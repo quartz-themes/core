@@ -14,11 +14,11 @@ import type {
   ThemeOptions,
 } from "./types";
 import { TEMPLATE_BASELINE_CSS, TEMPLATE_CSS } from "./templateCSS";
-import { resolveThemeId, loadTheme } from "./registry";
+import { resolveThemeId, loadTheme, resolveThemePackage } from "./registry";
 import { generateCalloutIconCSS } from "./icons/callout-icons";
 import { generateCheckboxIconCSS } from "./icons/checkbox-icons";
 import { FONT_CSS } from "./fonts/generated-fonts";
-import { FONT_BASE_URL } from "./fonts/font-tag";
+import { FONT_CDN_BASE } from "./fonts/font-tag";
 
 /** All aspect keys in the order they should appear in the CSS output. */
 const ASPECT_ORDER: AspectKey[] = [
@@ -51,7 +51,7 @@ const ASPECT_ORDER: AspectKey[] = [
 
 function generateFontFaceCSS(
   fontFiles: FontFileEntry[] | undefined,
-  themeName: string,
+  packageName: string,
 ): string {
   if (!fontFiles || fontFiles.length === 0) return "";
 
@@ -62,7 +62,7 @@ function generateFontFaceCSS(
         `  font-family: "${font.family}";\n` +
         `  font-style: ${font.style};\n` +
         `  font-weight: ${font.weight};\n` +
-        `  src: url("${FONT_BASE_URL}/${themeName}/${font.file}") format("${font.format}");\n` +
+        `  src: url("${FONT_CDN_BASE}/${packageName}/fonts/${font.file}") format("${font.format}");\n` +
         (font.unicodeRange ? `  unicode-range: ${font.unicodeRange};\n` : "") +
         `}`,
     )
@@ -118,25 +118,31 @@ export function composeCSS(options: ThemeOptions): ComposedTheme {
     parts.push("/* extras */\n" + baseTheme.extras);
   }
 
+  const themeFontsEnabled = options.themeFonts !== false;
+
   const iconFontCSS = baseTheme.meta.fonts
     .filter((f) => f.startsWith("icons/"))
     .map((name) => FONT_CSS[name])
     .filter(Boolean)
     .join("\n\n");
 
-  const regularFontCSS = generateFontFaceCSS(
-    baseTheme.meta.fontFiles,
-    baseTheme.meta.fontDir ?? baseTheme.meta.name,
-  );
+  let regularFontCSS = "";
+  if (themeFontsEnabled) {
+    const { packageName } = resolveThemePackage(baseThemeId);
+    regularFontCSS = generateFontFaceCSS(
+      baseTheme.meta.fontFiles,
+      packageName,
+    );
+  }
 
-  // Fallback: if no fontFiles metadata, use legacy FONT_CSS for non-icon fonts
-  const legacyFontCSS = !regularFontCSS
-    ? baseTheme.meta.fonts
-        .filter((f) => !f.startsWith("icons/"))
-        .map((name) => FONT_CSS[name])
-        .filter(Boolean)
-        .join("\n\n")
-    : "";
+  const legacyFontCSS =
+    themeFontsEnabled && !regularFontCSS
+      ? baseTheme.meta.fonts
+          .filter((f) => !f.startsWith("icons/"))
+          .map((name) => FONT_CSS[name])
+          .filter(Boolean)
+          .join("\n\n")
+      : "";
 
   const fontCSS = [iconFontCSS, regularFontCSS || legacyFontCSS]
     .filter(Boolean)

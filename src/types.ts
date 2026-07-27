@@ -231,6 +231,8 @@ export interface ThemeOptions {
    * These correspond to the extras/callouts/ SCSS files.
    */
   calloutStyle?: string;
+  /** Whether to include the theme's @font-face declarations. @default true */
+  themeFonts?: boolean;
   /** Font overrides. */
   fonts?: { header?: string; body?: string; code?: string };
   /**

@@ -74,7 +74,8 @@
     "defaultEnabled": true,
     "defaultOptions": {
       "theme": "tokyo-night",
-      "mode": "both"
+      "mode": "both",
+      "themeFonts": true
     },
     "optionSchema": {
       "theme": {
@@ -93,6 +94,9 @@
       },
       "styleSettings": {
         "type": "object"
+      },
+      "themeFonts": {
+        "type": "boolean"
       },
       "calloutStyle": {
         "type": "string"

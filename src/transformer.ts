@@ -103,7 +103,7 @@ export const QuartzTheme: QuartzTransformerPlugin<Partial<ThemeOptions>> = (
       themeMeta,
     } = composeCSS(options);
 
-    if (resolvedCSS && themeMeta) {
+    if (resolvedCSS && themeMeta && options.themeFonts !== false) {
       const fontVars = extractFontVars(resolvedCSS);
       (globalThis as Record<string, unknown>).__quartzFonts = {
         themeName: options.theme,
