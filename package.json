@@ -58,6 +58,7 @@
     "@lucide/icons": "^1.7.0",
     "@types/node": "^24.10.0",
     "tsup": "^8.5.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
   "publishConfig": {
