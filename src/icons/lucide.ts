@@ -30,12 +30,13 @@ function renderNodes(nodes: LucideIconNode[]): string {
 /** Lucide icons are drawn on a 24×24 grid; since @lucide/icons 1.70 the size fields are optional. */
 const LUCIDE_GRID = 24;
 
+/** The size fields across @lucide/icons versions: before 1.70 `size` or `width`/`height` is required. */
+type IconSizeFields = { size?: number; width?: number; height?: number };
+
 function getIconSize(icon: LucideIconData): { width: number; height: number } {
-  if (icon.size !== undefined) return { width: icon.size, height: icon.size };
-  return {
-    width: icon.width ?? LUCIDE_GRID,
-    height: icon.height ?? LUCIDE_GRID,
-  };
+  const { size, width, height } = icon as LucideIconData & IconSizeFields;
+  if (size !== undefined) return { width: size, height: size };
+  return { width: width ?? LUCIDE_GRID, height: height ?? LUCIDE_GRID };
 }
 
 export function buildSvgString(icon: LucideIconData): string {
