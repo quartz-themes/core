@@ -60,10 +60,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Trusted publishing needs npm 11.5.1 or later, which Node 24 bundles (22 has npm 10).
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
       - run: npm install
       - run: npm run build
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm trusted publishing: `id-token: write` (above) lets npm exchange the job's OIDC token
+      # for a short-lived publish credential, with provenance attached. No npm token needed.
+      - run: npm publish --access public
