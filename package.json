@@ -1,6 +1,6 @@
 {
   "name": "@quartz-themes/core",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Quartz transformer plugin for Obsidian themes — per-aspect mix-and-match configuration.",
   "type": "module",
   "license": "MIT",

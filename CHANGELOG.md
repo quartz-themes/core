@@ -1,3 +1,11 @@
+## 2.0.1
+
+### Patch Changes
+
+- Lucide icons render at the right size with `@lucide/icons` 1.70+, whose icon data no longer
+  always includes a size: a missing size falls back to Lucide's 24-unit grid. Also fixes the
+  typecheck against those versions.
+
 ## 2.0.0
 
 ### Major Changes
