@@ -18,6 +18,7 @@ jobs:
       - run: npm install
       - run: npm run typecheck
       - run: npm run build
+      - run: npm test
       - name: Verify dist externals
         run: |
           node -e "
