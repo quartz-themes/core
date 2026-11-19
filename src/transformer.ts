@@ -1,29 +1,25 @@
 /**
- * QuartzTheme — Transformer plugin that injects Obsidian theme CSS into Quartz sites.
+ * QuartzTheme — style a Quartz site with an Obsidian community theme.
  *
- * This is a pure transformer: no component needed. CSS is injected via externalResources()
- * and Quartz's built-in Darkmode() component handles light/dark switching via
- * :root.dark / :root.light CSS class toggles.
+ * The factory is async (Quartz 5.2+ awaits it): it resolves the theme,
+ * downloads it if needed, and converts it with the static converter before
+ * the build starts. CSS is then injected through externalResources().
  */
-
+import fs from "node:fs";
+import postcss from "postcss";
 import type {
-  QuartzTransformerPlugin,
-  JSResource,
   CSSResource,
+  JSResource,
+  QuartzTransformerPluginInstance,
 } from "@quartz-community/types";
-import type { ThemeOptions } from "./types";
-import { composeCSS } from "./composer";
-import { processStyleSettings, loadStyleSettings } from "./styleSettings";
-import { TEMPLATE_OVERRIDE_CSS } from "./templateCSS";
+import { convertTheme } from "./convert";
+import { resolveSnippet, resolveTheme } from "./sources";
+import type { StyleSettingsExport, ThemeOptions } from "./types";
 
-const defaultOptions: ThemeOptions = { theme: "tokyo-night", mode: "both" };
+const defaultOptions: ThemeOptions = { theme: "Tokyo Night", mode: "both" };
+const DEPRECATED = ["aspects", "include", "calloutStyle", "fonts"] as const;
 
-/**
- * Font variable names to extract for inter-plugin communication.
- * Includes both the resolved font stacks (--font-text, etc.) and
- * the theme-specific slots (--font-text-theme, etc.) so downstream
- * consumers can identify the actual font families the theme uses.
- */
+/** Font variables shared with other plugins (e.g. Fonts) through globalThis.__quartzFonts. */
 const FONT_VAR_NAMES = [
   "--font-text",
   "--font-text-theme",
@@ -39,143 +35,128 @@ const FONT_VAR_NAMES = [
   "--h6-font",
 ] as const;
 
-function extractFontVars(css: string): Record<string, string> {
+export function extractFontVars(css: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const varName of FONT_VAR_NAMES) {
-    const pattern = new RegExp(
-      `${varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*([^;]+)`,
-    );
-    const match = css.match(pattern);
-    if (match?.[1]) {
-      const value = match[1].trim();
-      if (value && !value.startsWith("var(") && value !== "inherit") {
-        result[varName] = value;
-      }
-    }
+  for (const name of FONT_VAR_NAMES) {
+    const m = css.match(new RegExp(`${name}\\s*:\\s*([^;}]+)`));
+    const value = m?.[1]?.trim();
+    if (value && !value.startsWith("var(") && value !== "inherit")
+      result[name] = value;
   }
   return result;
 }
 
+export function loadStyleSettings(
+  input: StyleSettingsExport | string | undefined,
+): StyleSettingsExport {
+  if (!input) return {};
+  if (typeof input === "string")
+    return JSON.parse(fs.readFileSync(input, "utf-8")) as StyleSettingsExport;
+  return input;
+}
+
+/** Remove the theme's web fonts (themeFonts: false). */
+function stripFonts(css: string): string {
+  const root = postcss.parse(css);
+  root.walkAtRules(/^(font-face|import)$/i, (at) => {
+    if (
+      at.name.toLowerCase() === "font-face" ||
+      /fonts?\b|\.woff|\.ttf|\.otf/i.test(at.params)
+    )
+      at.remove();
+  });
+  return root.toString();
+}
+
+const log = (msg: string) => console.log(`[QuartzTheme] ${msg}`);
+
 /**
- * QuartzTheme transformer plugin.
- *
- * @example
- * ```ts
- * // Basic usage
- * QuartzTheme({ theme: "tokyo-night", mode: "both" })
- *
- * // With variation
- * QuartzTheme({ theme: "catppuccin", variation: "frappe", mode: "both" })
- *
- * // Mix-and-match aspects
- * QuartzTheme({
- *   theme: "tokyo-night",
- *   mode: "both",
- *   aspects: {
- *     callouts: "anuppuccin",
- *     tables: "minimal",
- *     code: false,
- *   },
- * })
- * ```
+ * An async transformer factory (Quartz 5.2+ awaits it). Declared here rather than taken from
+ * @quartz-community/types (`QuartzAsyncTransformerPlugin`, 1.4+) so core works with older types.
  */
-export const QuartzTheme: QuartzTransformerPlugin<Partial<ThemeOptions>> = (
-  userOptions?: Partial<ThemeOptions>,
-) => {
+type AsyncTransformerPlugin<Options> = (
+  opts?: Options,
+) => Promise<QuartzTransformerPluginInstance>;
+
+export const QuartzTheme: AsyncTransformerPlugin<
+  Partial<ThemeOptions>
+> = async (userOptions) => {
   const options: ThemeOptions = { ...defaultOptions, ...userOptions };
+  for (const key of DEPRECATED) {
+    if (options[key] !== undefined)
+      log(
+        `option "${key}" was removed in 3.0 and is ignored (themes are converted whole).`,
+      );
+  }
 
-  let cssResources: CSSResource[] | undefined;
-  let jsResources: JSResource[] | undefined;
+  const spec = options.variation
+    ? `${options.theme}.${options.variation}`
+    : options.theme;
+  const sourceOpts = {
+    cacheDir: options.cacheDir,
+    cacheTtl: (options.cacheHours ?? 24) * 60 * 60 * 1000,
+    version: options.version,
+  };
+  const theme = await resolveTheme(spec, sourceOpts);
+  const snippets = await Promise.all(
+    (options.snippets ?? []).map((s) => resolveSnippet(s, sourceOpts)),
+  );
+  // A pre-3.0 variant id implies a preset; the user's own settings win.
+  const styleSettings = {
+    ...theme.styleSettings,
+    ...loadStyleSettings(options.styleSettings),
+  };
 
-  function buildResources(): { css: CSSResource[]; js: JSResource[] } {
-    if (cssResources && jsResources)
-      return { css: cssResources, js: jsResources };
+  const t0 = performance.now();
+  const result = convertTheme({ themeCss: theme.css, styleSettings, snippets });
+  const s = result.report.theme;
+  log(
+    `${theme.name}${theme.version ? ` ${theme.version}` : ""}: ${s.rules} rules converted in ${Math.round(performance.now() - t0)} ms` +
+      (s.repaired ? " (repaired malformed CSS)" : "") +
+      (result.report.styleSettings.applied.length
+        ? `, ${result.report.styleSettings.applied.length} Style Settings applied`
+        : ""),
+  );
+  if (result.report.styleSettings.unknown.length) {
+    log(
+      `unknown Style Settings keys (ignored): ${result.report.styleSettings.unknown.join(", ")}`,
+    );
+  }
 
-    const css: CSSResource[] = [];
-    const js: JSResource[] = [];
+  // Modes: honour what the theme supports.
+  let mode = options.mode;
+  const supported = theme.modes;
+  if (supported?.length === 1 && mode !== supported[0]) {
+    if (mode !== "both")
+      log(`"${theme.name}" only supports ${supported[0]} mode; using it.`);
+    mode = supported[0]!;
+  }
 
-    const {
-      css: resolvedCSS,
-      effectiveMode,
-      styleSettingsId,
-      classSettings,
-      brokenVarLinks,
-      themeMeta,
-    } = composeCSS(options);
+  let main = result.main;
+  let raw = result.raw;
+  if (options.themeFonts === false) {
+    main = stripFonts(main);
+    raw = raw && stripFonts(raw);
+  } else {
+    (globalThis as Record<string, unknown>).__quartzFonts = {
+      themeName: theme.name,
+      fonts: extractFontVars(result.themeCss),
+    };
+  }
 
-    if (resolvedCSS && themeMeta && options.themeFonts !== false) {
-      const fontVars = extractFontVars(resolvedCSS);
-      (globalThis as Record<string, unknown>).__quartzFonts = {
-        themeName: options.theme,
-        fonts: fontVars,
-        fontFiles: themeMeta.fontFiles,
-        fontDir: themeMeta.fontDir,
-      };
-    }
-
-    const isSingleMode = effectiveMode !== "both";
-
-    if (resolvedCSS) {
-      css.push({
-        content:
-          `@layer quartz-base, obsidian-theme, quartz-themes-base, obsidian-theme-overrides;\n` +
-          `@layer obsidian-theme {\n${resolvedCSS}\n}`,
-        inline: true,
-      });
-
-      css.push({
-        content: `@layer quartz-themes-base {\n${TEMPLATE_OVERRIDE_CSS}\n}`,
-        inline: true,
-      });
-    }
-
-    if (isSingleMode) {
-      css.push({
-        content:
-          `button.darkmode { display: none !important; }\n` +
-          `:root { color-scheme: ${effectiveMode}; }\n`,
-        inline: true,
-      });
-
-      js.push({
-        loadTime: "beforeDOMReady",
-        contentType: "inline",
-        script:
-          `document.documentElement.setAttribute("saved-theme", "${effectiveMode}");\n` +
-          `localStorage.setItem("theme", "${effectiveMode}");`,
-      });
-    }
-
-    if (options.styleSettings) {
-      if (
-        styleSettingsId &&
-        (!Array.isArray(styleSettingsId) || styleSettingsId.length > 0)
-      ) {
-        const settings = loadStyleSettings(options.styleSettings);
-        const { css: overrideCSS } = processStyleSettings(
-          settings,
-          styleSettingsId,
-          classSettings,
-          brokenVarLinks,
-        );
-
-        if (overrideCSS) {
-          css.push({
-            content: `@layer obsidian-theme-overrides {\n${overrideCSS}\n}`,
-            inline: true,
-          });
-        }
-      } else {
-        console.warn(
-          `[QuartzTheme] styleSettings provided but theme "${options.theme}" has no Style Settings id. ` +
-            `Style Settings overrides will be ignored.`,
-        );
-      }
-    }
-
-    cssResources = css;
-    jsResources = js;
-    return { css, js };
+  const css: CSSResource[] = [{ content: main, inline: true }];
+  if (raw) css.push({ content: raw, inline: true });
+  const js: JSResource[] = [];
+  if (mode !== "both") {
+    css.push({
+      content: `button.darkmode { display: none !important; }\n:root { color-scheme: ${mode}; }\n`,
+      inline: true,
+    });
+    js.push({
+      loadTime: "beforeDOMReady",
+      contentType: "inline",
+      script: `document.documentElement.setAttribute("saved-theme", "${mode}");\nlocalStorage.setItem("theme", "${mode}");`,
+    });
   }
 
   return {
@@ -184,7 +165,6 @@ export const QuartzTheme: QuartzTransformerPlugin<Partial<ThemeOptions>> = (
       return src;
     },
     externalResources() {
-      const { css, js } = buildResources();
       return { css, js, additionalHead: [] };
     },
   };

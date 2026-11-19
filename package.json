@@ -1,7 +1,7 @@
 {
   "name": "@quartz-themes/core",
-  "version": "2.0.1",
-  "description": "Quartz transformer plugin for Obsidian themes — per-aspect mix-and-match configuration.",
+  "version": "3.0.0",
+  "description": "Quartz transformer plugin: use any Obsidian community theme, converted at build time.",
   "type": "module",
   "license": "MIT",
   "author": "saberzero1",
@@ -41,7 +41,8 @@
     "dev": "tsup --watch",
     "test": "node --test --import tsx src/tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "generate": "tsx scripts/generate.ts"
   },
   "peerDependencies": {
     "preact": "^10.0.0"
@@ -52,10 +53,18 @@
     }
   },
   "dependencies": {
-    "@quartz-community/types": "^1.0.0"
+    "@quartz-community/types": "^1.0.0",
+    "css-tree": "^3.1.0",
+    "js-yaml": "^4.1.0",
+    "lightningcss": "^1.31.1",
+    "postcss": "^8.5.6",
+    "postcss-safe-parser": "^7.0.1",
+    "postcss-selector-parser": "^7.1.1"
   },
   "devDependencies": {
     "@lucide/icons": "^1.7.0",
+    "@types/css-tree": "^2.3.10",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.10.0",
     "tsup": "^8.5.0",
     "tsx": "^4.23.15",
@@ -69,12 +78,12 @@
     "displayName": "Quartz Themes",
     "category": "transformer",
     "version": "1.0.0",
-    "quartzVersion": ">=5.0.0",
+    "quartzVersion": ">=5.2.0",
     "dependencies": [],
     "defaultOrder": 10,
     "defaultEnabled": true,
     "defaultOptions": {
-      "theme": "tokyo-night",
+      "theme": "Tokyo Night",
       "mode": "both",
       "themeFonts": true
     },
@@ -90,26 +99,26 @@
           "both"
         ]
       },
-      "variation": {
-        "type": "string"
-      },
       "styleSettings": {
         "type": "object"
+      },
+      "snippets": {
+        "type": "array"
+      },
+      "version": {
+        "type": "string"
       },
       "themeFonts": {
         "type": "boolean"
       },
-      "calloutStyle": {
+      "cacheDir": {
         "type": "string"
       },
-      "fonts": {
-        "type": "object"
+      "cacheHours": {
+        "type": "number"
       },
-      "aspects": {
-        "type": "object"
-      },
-      "include": {
-        "type": "array"
+      "variation": {
+        "type": "string"
       }
     }
   },
