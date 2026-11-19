@@ -30,7 +30,8 @@ const safeParseRoot = (css: string, opts: { from: string }) =>
   safeParse(css, opts) as Root;
 import safeParse from "postcss-safe-parser";
 import selectorParser from "postcss-selector-parser";
-import * as csstree from "css-tree";
+// The prebuilt bundle: css-tree's lib/ loads JSON at runtime, which breaks once bundled.
+import * as csstree from "css-tree/dist/csstree.esm";
 import { Features, transform } from "lightningcss";
 import {
   BODY_STATE,
