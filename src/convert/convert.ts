@@ -31,7 +31,7 @@ const safeParseRoot = (css: string, opts: { from: string }) =>
 import safeParse from "postcss-safe-parser";
 import selectorParser from "postcss-selector-parser";
 import * as csstree from "css-tree";
-import { transform } from "lightningcss";
+import { Features, transform } from "lightningcss";
 import {
   BODY_STATE,
   WRAPPER_CLASSES,
@@ -386,6 +386,7 @@ export const QUARTZ_TARGETS = {
   chrome: 109 << 16,
 };
 
+/** Exactly how Quartz minifies plugin CSS (componentResources.ts): same targets and features. */
 function lightningAccepts(css: string): boolean {
   try {
     transform({
@@ -393,6 +394,7 @@ function lightningAccepts(css: string): boolean {
       code: Buffer.from(css),
       minify: true,
       targets: QUARTZ_TARGETS,
+      include: Features.MediaQueries,
     });
     return true;
   } catch {

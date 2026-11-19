@@ -10,7 +10,7 @@
  *
  * Community themes are downloaded the way Obsidian installs them: the theme's
  * manifest at HEAD gives its version; theme.css comes from that GitHub release,
- * falling back to the default branch (and `obsidian.css` for legacy themes).
+ * falling back to the default branch, then `obsidian.css` (pre-1.0 themes), as Obsidian does.
  * Everything is cached in .quartz-cache/quartz-themes, so rebuilds and offline
  * builds work; cached registry/manifest data is refreshed after `cacheTtl`.
  */
@@ -174,8 +174,9 @@ async function fetchCommunityTheme(
     `${entry.repo}@HEAD${version ? `-${version}` : ""}.theme.css`,
     raw("theme.css"),
   ]);
-  if (entry.legacy)
-    tryUrls.push([`${entry.repo}@HEAD.obsidian.css`, raw("obsidian.css")]);
+  // Like Obsidian: themes without a theme.css (pre-1.0, or unflagged in the
+  // registry) ship an obsidian.css.
+  tryUrls.push([`${entry.repo}@HEAD.obsidian.css`, raw("obsidian.css")]);
 
   for (const [key, url] of tryUrls) {
     // Release assets are immutable: cache forever. HEAD files: honour the ttl.

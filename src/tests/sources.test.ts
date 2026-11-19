@@ -12,7 +12,7 @@ const REGISTRY = [
     modes: ["dark", "light"],
   },
   { name: "Catppuccin", repo: "catppuccin/obsidian", modes: ["dark", "light"] },
-  { name: "Old One", repo: "someone/old", legacy: true },
+  { name: "Old One", repo: "someone/old" },
 ];
 
 function mockFetch(files: Record<string, string>, calls: string[] = []) {
@@ -51,7 +51,7 @@ describe("resolveTheme", () => {
     assert.equal(t.css, "/* release */");
   });
 
-  test("falls back to the default branch, and obsidian.css for legacy themes", async () => {
+  test("falls back to the default branch, then obsidian.css (also for unflagged themes)", async () => {
     const fetch = mockFetch({
       [registryUrl]: JSON.stringify(REGISTRY),
       [raw("someone/old", "obsidian.css")]: "/* legacy */",
