@@ -1,0 +1,189 @@
+/**
+ * Compose the final stylesheet a Quartz site gets:
+ *
+ *   @layer quartz-base   — Quartz's own index.css + component CSS (lowest)
+ *   @layer obsidian      — converted Obsidian app.css, then the theme, then
+ *                          Style Settings, in source order, exactly like
+ *                          Obsidian's cascade
+ *
+ * plus a bridge that points Quartz's own variables at Obsidian's, so
+ * Quartz-only components (graph, search, explorer chrome…) follow the theme.
+ */
+
+/** Quartz variable → Obsidian variable. Defined on <body>, where Obsidian defines its vars. */
+export const BRIDGE: Record<string, string> = {
+  "--light": "var(--background-primary)",
+  "--lightgray": "var(--background-modifier-border)",
+  "--gray": "var(--text-faint)",
+  "--darkgray": "var(--text-normal)",
+  "--dark": "var(--text-normal)",
+  "--secondary": "var(--text-accent)",
+  "--tertiary": "var(--text-accent-hover)",
+  "--highlight": "var(--background-modifier-hover)",
+  "--textHighlight": "var(--text-highlight-bg)",
+  "--bodyFont": "var(--font-text)",
+  "--headerFont": "var(--font-text)",
+  "--codeFont": "var(--font-monospace)",
+};
+
+/**
+ * Inside rendered markdown, Quartz's own base styles (layer quartz-base) would
+ * show through wherever Obsidian's app.css leaves a property unset, e.g. hr
+ * backgrounds or callout borders. Reverting these elements to UA styles at
+ * zero specificity — first thing in the obsidian layer — makes Obsidian's
+ * rules the only author styles that apply, as in Obsidian. Custom properties
+ * are unaffected by `all`.
+ */
+export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, input[type="checkbox"]) {
+  all: revert;
+}
+`;
+
+/**
+ * Obsidian renders callout icons as an <svg> sized by --icon-size in the
+ * callout colour; Quartz renders an empty .callout-icon. Paint the icon the
+ * converter resolved into --callout-icon (a data URI) as a mask in
+ * currentColor, at zero specificity so themes can restyle it.
+ */
+export const CALLOUT_ICON_CSS = `:where(.callout-icon) {
+  display: flex;
+  align-items: center;
+}
+:where(.callout-icon)::before {
+  content: "";
+  display: block;
+  width: var(--icon-size, 18px);
+  height: var(--icon-size, 18px);
+  background-color: currentColor;
+  -webkit-mask: var(--callout-icon) no-repeat center / contain;
+  mask: var(--callout-icon) no-repeat center / contain;
+}
+`;
+
+/**
+ * Quartz (5.1+) defines Obsidian's variables on :root from its own colours
+ * (`--text-highlight-bg: var(--textHighlight)`, …) so Obsidian-styled plugins
+ * look right without a theme. With a theme those definitions leak: Obsidian's
+ * own CSS relies on several being undefined (e.g. Obsidian 1.15 no longer sets
+ * `--text-highlight-bg`, so `var(--text-highlight-bg, <default>)` falls back).
+ * Resetting them to `initial` (the guaranteed-invalid value, same as undefined)
+ * on <body> at zero specificity, before app.css and the theme, restores
+ * Obsidian's behaviour; anything Obsidian or the theme defines still wins.
+ * Keep in sync with quartz/util/theme.ts.
+ */
+export const QUARTZ_OBSIDIAN_VARS = [
+  "--accent-h",
+  "--accent-l",
+  "--accent-s",
+  "--background-modifier-border",
+  "--background-modifier-border-focus",
+  "--background-modifier-border-hover",
+  "--background-primary",
+  "--background-primary-alt",
+  "--background-secondary",
+  "--background-secondary-alt",
+  "--color-base-00",
+  "--color-base-05",
+  "--color-base-10",
+  "--color-base-100",
+  "--color-base-20",
+  "--color-base-25",
+  "--color-base-30",
+  "--color-base-35",
+  "--color-base-40",
+  "--color-base-50",
+  "--color-base-60",
+  "--color-base-70",
+  "--divider-color",
+  "--font-interface",
+  "--font-monospace",
+  "--font-text",
+  "--icon-color",
+  "--icon-color-active",
+  "--icon-color-hover",
+  "--interactive-accent",
+  "--interactive-accent-hover",
+  "--interactive-hover",
+  "--interactive-normal",
+  "--link-color",
+  "--link-color-hover",
+  "--nav-item-background-active",
+  "--nav-item-background-hover",
+  "--nav-item-color",
+  "--nav-item-color-active",
+  "--nav-item-color-hover",
+  "--tag-background",
+  "--tag-background-hover",
+  "--tag-color",
+  "--text-accent",
+  "--text-accent-hover",
+  "--text-faint",
+  "--text-highlight-bg",
+  "--text-muted",
+  "--text-normal",
+  "--text-on-accent",
+  "--text-on-accent-inverted",
+];
+
+export function resetCss(): string {
+  return `:where(body) {\n${QUARTZ_OBSIDIAN_VARS.map((v) => `  ${v}: initial;`).join("\n")}\n}\n`;
+}
+
+export function bridgeCss(): string {
+  const decls = Object.entries(BRIDGE)
+    .map(([k, v]) => `  ${k}: ${v};`)
+    .join("\n");
+  // :where() keeps specificity at 0 so any theme rule can override it.
+  return `:where(body) {\n${decls}\n}\n`;
+}
+
+export interface ComposeInput {
+  app: string;
+  theme: string;
+  quarantine?: string;
+  settings?: string;
+  reset?: boolean;
+}
+
+/**
+ * @returns `main` (minifiable) and `raw`, which must be served as a separate
+ *   resource so Quartz's minifier can't reject the main sheet because of it.
+ */
+export function composeStylesheet({
+  app,
+  theme,
+  quarantine = "",
+  settings = "",
+  reset = true,
+}: ComposeInput) {
+  const main = [
+    "@layer quartz-base, obsidian;",
+    "@layer obsidian {",
+    reset && CONTENT_RESET,
+    CALLOUT_ICON_CSS,
+    resetCss(),
+    bridgeCss(),
+    app,
+    theme,
+    settings,
+    "}",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const raw = quarantine ? `@layer obsidian {\n${quarantine}\n}` : "";
+  return { main: hoistImports(main), raw };
+}
+
+/** @import must precede everything except @charset/@layer statements. */
+function hoistImports(css: string): string {
+  const imports: string[] = [];
+  // url()/strings may contain `;` (Google Fonts: `wght@0,400;0,700`), so match them whole.
+  const rest = css.replace(
+    /@import\s+(?:url\(\s*(?:'[^']*'|"[^"]*"|[^)]*)\s*\)|'[^']*'|"[^"]*")[^;]*;/g,
+    (m) => {
+      imports.push(m);
+      return "";
+    },
+  );
+  return imports.join("\n") + (imports.length ? "\n" : "") + rest;
+}
