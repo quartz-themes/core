@@ -534,6 +534,7 @@ function processSelector(
         !prev.bodyish &&
         !toContentRoot(prev) &&
         !cur.named &&
+        !cur.wrapper &&
         !toContentRoot(cur)
       )
         return { drop: "wrapperSubject" };
@@ -566,6 +567,42 @@ function processSelector(
       );
     r.named = r.concrete = true;
     changed = anyConcrete = true;
+
+    // Obsidian wraps every block in a div (`div.el-h1 > h1`); Quartz doesn't.
+    // `sizer > div` is "a top-level block" → any child of the root;
+    // `sizer > div h1` is "a heading in the note" → the wrapper is elided.
+    const rootIdx = prevIsRoot ? i - 1 : i;
+    const wrapper = splitCompounds(sel)[rootIdx + 1];
+    if (!wrapper || !isChild(wrapper.before)) continue;
+    // Only a bare `div` / `*`, optionally with pseudos (`:has(img)`, `::before`).
+    if (
+      !wrapper.nodes.every(
+        (n) =>
+          (n.type === "tag" && n.value.toLowerCase() === "div") ||
+          n.type === "universal" ||
+          n.type === "pseudo",
+      )
+    )
+      continue;
+    for (const n of wrapper.nodes) {
+      if (n.type === "tag") {
+        for (const p of pad([0, 0, 1])) n.parent!.insertBefore(n, p);
+        n.remove();
+      } else if (n.type === "universal") n.remove();
+    }
+    const fresh = splitCompounds(sel);
+    const w = fresh[rootIdx + 1]!;
+    const isPadding = (n: SNode) =>
+      n.type === "pseudo" && n.value === ":not" && /qt-0\)$/.test(String(n));
+    if (rootIdx + 1 < fresh.length - 1 && w.nodes.every(isPadding)) {
+      // Elide: move its specificity onto the root compound, drop `> wrapper`.
+      const rootLast = fresh[rootIdx]!.nodes.at(-1)!;
+      for (const n of [...w.nodes].reverse()) {
+        n.remove();
+        rootLast.parent!.insertAfter(rootLast, n);
+      }
+      w.before!.remove();
+    }
   }
 
   // Bare form controls style Obsidian's UI; in Quartz they would hit chrome.

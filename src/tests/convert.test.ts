@@ -62,20 +62,33 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view .markdown-preview-sizer > div { width: 1px }",
       ),
-      ".markdown-preview-view:not(.qt-0)>div { width: 1px }",
+      ".markdown-preview-view:not(.qt-0)>:not(qt-0) { width: 1px }",
     );
     assert.equal(
       conv(".markdown-preview-section > div:has(img) { width: 1px }"),
-      ":where(.markdown-preview-view):not(.qt-0)>div:has(img) { width: 1px }",
+      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0):has(img) { width: 1px }",
     );
     assert.equal(
       conv("div.markdown-preview-sizer > div::before { color: red }"),
-      ":where(.markdown-preview-view):not(qt-0):not(.qt-0)>div::before { color: red }",
+      ":where(.markdown-preview-view):not(qt-0):not(.qt-0)>:not(qt-0)::before { color: red }",
+    );
+    // Obsidian's per-block wrapper div doesn't exist in Quartz.
+    assert.equal(
+      conv(".markdown-preview-section > div h1 { color: red }"),
+      ":where(.markdown-preview-view):not(.qt-0):not(qt-0) h1 { color: red }",
+    );
+    assert.equal(
+      conv(".markdown-preview-sizer > div > p { color: red }"),
+      ":where(.markdown-preview-view):not(.qt-0):not(qt-0)>p { color: red }",
     );
   });
 
   test("children of other elided wrappers need a name of their own", () => {
     assert.equal(conv(".view-content > div { color: red }"), "");
+    assert.equal(
+      conv(".workspace > .workspace-split.mod-root hr { color: red }"),
+      ":not(.qt-0)>:not(.qt-0):not(.qt-0) hr { color: red }",
+    );
     assert.equal(
       conv(".markdown-reading-view > .markdown-preview-view { color: red }"),
       ":not(.qt-0)>.markdown-preview-view { color: red }",
