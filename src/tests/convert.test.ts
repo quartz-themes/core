@@ -57,6 +57,67 @@ describe("selector rewriting", () => {
     assert.equal(conv(".cm-line, p { color: red }"), "p { color: red }");
   });
 
+  test("content wrappers map onto Quartz's content root, not any element", () => {
+    assert.equal(
+      conv(
+        ".markdown-preview-view .markdown-preview-sizer > div { width: 1px }",
+      ),
+      ".markdown-preview-view:not(.qt-0)>div { width: 1px }",
+    );
+    assert.equal(
+      conv(".markdown-preview-section > div:has(img) { width: 1px }"),
+      ":where(.markdown-preview-view):not(.qt-0)>div:has(img) { width: 1px }",
+    );
+    assert.equal(
+      conv("div.markdown-preview-sizer > div::before { color: red }"),
+      ":where(.markdown-preview-view):not(qt-0):not(.qt-0)>div::before { color: red }",
+    );
+  });
+
+  test("children of other elided wrappers need a name of their own", () => {
+    assert.equal(conv(".view-content > div { color: red }"), "");
+    assert.equal(
+      conv(".markdown-reading-view > .markdown-preview-view { color: red }"),
+      ":not(.qt-0)>.markdown-preview-view { color: red }",
+    );
+    assert.equal(
+      conv("p:not(button) { color: red }"),
+      "p:not(button) { color: red }",
+    );
+  });
+
+  test("bare form controls don't reach Quartz chrome", () => {
+    assert.equal(conv("button { display: inline-flex }"), "");
+    assert.equal(
+      conv(".theme-dark button:not(.clickable-icon):hover { color: red }"),
+      "",
+    );
+    assert.equal(
+      conv(".search button { color: red }"),
+      ".search button { color: red }",
+    );
+    assert.equal(
+      conv("input[type=checkbox]::after { color: red }"),
+      "input[type=checkbox]:where(.markdown-rendered *)::after { color: red }",
+    );
+  });
+
+  test("scrollbar rules stay off the viewport", () => {
+    assert.equal(
+      conv("::-webkit-scrollbar { width: 8px }"),
+      ":where(:not(html, body))::-webkit-scrollbar { width: 8px }",
+    );
+    assert.equal(
+      conv(":hover::-webkit-scrollbar-thumb { color: red }"),
+      ":hover:where(:not(html, body))::-webkit-scrollbar-thumb { color: red }",
+    );
+    assert.equal(conv("body::-webkit-scrollbar { width: 8px }"), "");
+    assert.equal(
+      conv("body ::-webkit-scrollbar { width: 8px }"),
+      "body ::-webkit-scrollbar { width: 8px }",
+    );
+  });
+
   test("element rewrites: mark → text-highlight", () => {
     assert.equal(
       conv("mark { background: yellow }"),

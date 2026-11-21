@@ -41,6 +41,10 @@ import {
   RENAMES,
   RENAME_UNLESS,
   TAG_REWRITES,
+  CONTENT_WRAPPERS,
+  CONTENT_ROOT,
+  CONTENT_ROOT_CLASSES,
+  FORM_CONTROLS,
   isAppOnly,
 } from "./profile";
 
@@ -270,7 +274,7 @@ export function convertObsidianCss(
       out = selectorParser((selectors) => {
         selectors.each((sel) => {
           stats.selectors.in++;
-          const res = processSelector(sel, { bodyState });
+          const res = processSelector(sel, { bodyState }, true);
           if (res.drop) {
             dropReason ??= res.drop;
             sel.remove();
@@ -467,26 +471,145 @@ interface SelectorResult {
   structural?: boolean;
 }
 
-/** Rewrite one complex selector in place. */
-function processSelector(sel: SSelector, ctx: Ctx): SelectorResult {
-  const compounds: SNode[][] = [[]];
+interface Compound {
+  nodes: SNode[];
+  /** The combinator before this compound (undefined for the first). */
+  before?: selectorParser.Combinator;
+}
+
+function splitCompounds(sel: SSelector): Compound[] {
+  const out: Compound[] = [{ nodes: [] }];
   for (const node of [...sel.nodes]) {
-    if (node.type === "combinator") compounds.push([]);
-    else compounds[compounds.length - 1]!.push(node);
+    if (node.type === "combinator") out.push({ nodes: [], before: node });
+    else out[out.length - 1]!.nodes.push(node);
   }
+  return out;
+}
+
+const isChild = (c?: selectorParser.Combinator) => c?.value.trim() === ">";
+const isDescendantOrChild = (c?: selectorParser.Combinator) =>
+  c !== undefined && (c.value.trim() === "" || c.value.trim() === ">");
+
+/**
+ * Rewrite one complex selector in place. `top` is false for selectors nested
+ * in :not()/:is()/:has(), where dropping would invert or widen the meaning.
+ */
+function processSelector(
+  sel: SSelector,
+  ctx: Ctx,
+  top = false,
+): SelectorResult {
+  const compounds = splitCompounds(sel);
   let changed = false;
   let anyConcrete = false;
   let anyElided = false;
   let structural = false;
+  const results: CompoundResult[] = [];
   for (let i = 0; i < compounds.length; i++) {
     const isSubject = i === compounds.length - 1;
-    const res = processCompound(compounds[i]!, isSubject, ctx);
+    const res = processCompound(compounds[i]!.nodes, isSubject, ctx);
     if (res.drop) return { drop: res.drop };
+    results.push(res);
     if (res.changed) changed = true;
     if (res.concrete || res.bodyish) anyConcrete = true;
     if (res.wrapper) anyElided = true;
     if (isSubject) structural = !!res.structural;
   }
+
+  // A compound that is only content wrappers maps onto Quartz's content root.
+  const toContentRoot = (r: CompoundResult) =>
+    !!r.content && !r.named && !r.bodyish;
+
+  // `.view-content > div`: an elided wrapper's *children* have no Quartz
+  // counterpart, and padding would turn "child of the wrapper" into "any
+  // element with a parent". Keep it only if the child is named on its own.
+  if (top)
+    for (let i = 1; i < results.length; i++) {
+      const prev = results[i - 1]!;
+      const cur = results[i]!;
+      if (
+        isChild(compounds[i]!.before) &&
+        prev.wrapper &&
+        !prev.concrete &&
+        !prev.bodyish &&
+        !toContentRoot(prev) &&
+        !cur.named &&
+        !toContentRoot(cur)
+      )
+        return { drop: "wrapperSubject" };
+    }
+
+  // `.markdown-preview-view .markdown-preview-sizer > div` → `.markdown-preview-view:not(.qt-0) > div`;
+  // `.markdown-preview-sizer > div` → `:where(.markdown-preview-view):not(.qt-0) > div`.
+  // Right to left, so merging compound i into i-1 leaves earlier indices valid.
+  for (let i = compounds.length - 1; i >= 0; i--) {
+    const r = results[i]!;
+    if (!toContentRoot(r)) continue;
+    const current = splitCompounds(sel);
+    // A type selector can't follow other simple selectors; keep its specificity.
+    for (const n of current[i]!.nodes) {
+      if (n.type === "tag") {
+        for (const p of pad([0, 0, 1])) n.parent!.insertBefore(n, p);
+        n.remove();
+      } else if (n.type === "universal") n.remove();
+    }
+    const { nodes, before } = splitCompounds(sel)[i]!;
+    const prevIsRoot =
+      current[i - 1]?.nodes.some(
+        (n) => n.type === "class" && CONTENT_ROOT_CLASSES.includes(n.value),
+      ) && isDescendantOrChild(before);
+    if (prevIsRoot) before!.remove();
+    else if (nodes[0])
+      nodes[0].parent!.insertBefore(
+        nodes[0],
+        nodesOf(`:where(${CONTENT_ROOT})`)[0]!,
+      );
+    r.named = r.concrete = true;
+    changed = anyConcrete = true;
+  }
+
+  // Bare form controls style Obsidian's UI; in Quartz they would hit chrome.
+  if (top) {
+    const subject = results[results.length - 1]!;
+    const ancestorsConcrete = results.slice(0, -1).some((r) => r.concrete);
+    const control = (subject.tags ?? [])
+      .map((t) => FORM_CONTROLS[t])
+      .find(Boolean);
+    if (control && !subject.named && !ancestorsConcrete) {
+      if (control === "drop") return { drop: "appOnly" };
+      const last = splitCompounds(sel).at(-1)!.nodes;
+      const pseudoEl = last.find(
+        (n) => n.type === "pseudo" && n.value.startsWith("::"),
+      );
+      const q = nodesOf(":where(.markdown-rendered *)")[0]!;
+      if (pseudoEl) pseudoEl.parent!.insertBefore(pseudoEl, q);
+      else if (last.length)
+        last[last.length - 1]!.parent!.insertAfter(last[last.length - 1]!, q);
+      changed = true;
+    }
+  }
+
+  // Obsidian's html and body never scroll; Quartz's do. A theme's scrollbar
+  // rules are meant for panes, and on the viewport they turn the overlay
+  // scrollbar into a classic one (horizontal overflow on phones).
+  if (top) {
+    const last = splitCompounds(sel).at(-1)!.nodes;
+    const scrollbar = last.find(
+      (n) => n.type === "pseudo" && /^::-webkit-scrollbar/i.test(n.value),
+    );
+    const subject = results[results.length - 1]!;
+    if (scrollbar && results.length === 1) {
+      if (subject.bodyish || subject.rootish) return { drop: "appOnly" };
+      if (!subject.named && !(subject.tags ?? []).length) {
+        scrollbar.parent!.insertBefore(
+          scrollbar,
+          nodesOf(":where(:not(html, body))")[0]!,
+        );
+        changed = true;
+      }
+    }
+  }
+
   // `.workspace .workspace-tab-container > *` → nothing Quartz-specific left.
   if (anyElided && !anyConcrete) return { drop: "wrapperSubject" };
   return { changed, structural };
@@ -499,6 +622,14 @@ interface CompoundResult {
   wrapper?: boolean;
   bodyish?: boolean;
   structural?: boolean;
+  /** Narrowed by a class, id or attribute (`[type]` excepted), not just a type. */
+  named?: boolean;
+  /** Contains an elided content wrapper (CONTENT_WRAPPERS). */
+  content?: boolean;
+  /** Type selectors in the compound, lowercased. */
+  tags?: string[];
+  /** Matches the root element (`html`, `:root`). */
+  rootish?: boolean;
 }
 
 function processCompound(
@@ -513,6 +644,9 @@ function processCompound(
   let hasType = false;
   let structuralTarget = false;
   let hasRootish = false;
+  let named = false;
+  let content = false;
+  const tags: string[] = [];
   const hasClass = (c: string) =>
     nodes.some((n) => n.type === "class" && n.value === c);
   // Replacements keep the compound's position, so its first node is always at this index.
@@ -541,11 +675,12 @@ function processCompound(
           const target = WRAPPER_MAP[v]!;
           replace(node, [...nodesOf(`:where(${target})`), ...pad(CLASS_SPEC)]);
           if (target === "body") bodyish = true;
-          else concrete = true;
+          else concrete = named = true;
           structuralTarget = true;
         } else if (WRAPPER_CLASSES.has(v)) {
           replace(node, pad(CLASS_SPEC));
           wrapper = true;
+          if (CONTENT_WRAPPERS.has(v)) content = true;
         } else if (isAppOnly(v)) {
           return { drop: "appOnly" };
         } else if (
@@ -556,9 +691,9 @@ function processCompound(
             ...nodesOf(`:where(${RENAMES[v]})`),
             ...pad(CLASS_SPEC),
           ]);
-          concrete = true;
+          concrete = named = true;
         } else {
-          concrete = true;
+          concrete = named = true;
         }
         break;
       }
@@ -572,14 +707,16 @@ function processCompound(
               ? [...nodesOf(`:where(${target})`), ...pad(CLASS_SPEC)]
               : pad(CLASS_SPEC),
           );
-          if (target) concrete = true;
+          if (target) concrete = named = true;
         } else {
           concrete = true;
+          if (node.attribute.toLowerCase() !== "type") named = true;
         }
         break;
       }
       case "tag": {
         const tag = node.value.toLowerCase();
+        tags.push(tag);
         const rw = TAG_REWRITES[tag];
         if (rw?.replace) {
           replace(node, [...nodesOf(rw.replace), ...pad([0, 0, 1])]);
@@ -614,7 +751,7 @@ function processCompound(
           const res = processLogical(node, ctx);
           if (res.drop) return { drop: res.drop };
           if (res.changed) changed = true;
-          if (res.concrete) concrete = true;
+          if (res.concrete) concrete = named = true;
         } else if (node.value === ":root") {
           concrete = true;
           hasRootish = true;
@@ -623,7 +760,7 @@ function processCompound(
       }
       case "id":
       case "nesting":
-        concrete = true;
+        concrete = named = true;
         break;
       default:
         break;
@@ -649,6 +786,10 @@ function processCompound(
     wrapper,
     bodyish,
     structural: isSubject && (bodyish || structuralTarget || hasRootish),
+    named,
+    content,
+    tags,
+    rootish: hasRootish,
   };
 }
 

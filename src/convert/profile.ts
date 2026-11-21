@@ -98,6 +98,36 @@ export const WRAPPER_CLASSES = new Set<string>([
   "markdown-rendered-container",
 ]);
 
+/**
+ * Wrappers that hold the note's top-level blocks (`.markdown-preview-sizer >
+ * div` is "a block"). Quartz has no such wrapper: its content root
+ * (`div.markdown-preview-view.markdown-rendered`) holds the blocks directly,
+ * so these map onto the content root instead of being elided.
+ */
+export const CONTENT_WRAPPERS = new Set<string>([
+  "markdown-preview-sizer",
+  "markdown-preview-section",
+]);
+export const CONTENT_ROOT = ".markdown-preview-view";
+/** Classes on Quartz's content root element. */
+export const CONTENT_ROOT_CLASSES = [
+  "markdown-preview-view",
+  "markdown-rendered",
+];
+
+/**
+ * Bare form-control rules (`button { … }`) style Obsidian's own UI. In Quartz,
+ * every button is Quartz chrome (dark mode toggle, explorer, copy-code, …),
+ * which Quartz styles itself, so bare button/select/textarea rules are dropped
+ * and bare input rules (task checkboxes) are scoped to note content.
+ */
+export const FORM_CONTROLS: Record<string, "drop" | "content"> = {
+  button: "drop",
+  select: "drop",
+  textarea: "drop",
+  input: "content",
+};
+
 /** Wrapper classes that do have a Quartz counterpart. */
 export const WRAPPER_MAP: Record<string, string> = {
   "mod-left-split": ".left.sidebar",
