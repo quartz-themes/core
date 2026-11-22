@@ -1,3 +1,12 @@
+## 3.1.1
+
+### Patch Changes
+
+- `theme: default` (Obsidian's built-in theme, as in the Quartz Obsidian template) works
+  again: 3.0 looked it up in the community theme registry and failed to initialise.
+- No more "dropped 1 fonts whose files aren't part of the theme" on every build: Obsidian's
+  placeholder font face is left alone.
+
 ## 3.1.0
 
 ### Minor Changes

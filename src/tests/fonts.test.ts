@@ -9,10 +9,11 @@ const families = (css: string) =>
   [...css.matchAll(/font-family:\s*([^;]+);/g)]
     .map((m) => m[1]!.trim())
     .filter((_, i, a) => a.indexOf(_) === i);
+// app.css's src-less "??" placeholder face is always kept.
 const faces = (css: string) =>
-  [...css.matchAll(/@font-face\s*\{[^}]*font-family:\s*([^;]+);/g)].map((m) =>
-    m[1]!.trim(),
-  );
+  [...css.matchAll(/@font-face\s*\{[^}]*font-family:\s*([^;]+);/g)]
+    .map((m) => m[1]!.trim())
+    .filter((f) => f !== '"??"');
 
 describe("theme fonts", () => {
   test("unused families are pruned; used ones stay however they're named", () => {

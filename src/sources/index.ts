@@ -7,6 +7,7 @@
  *   - a GitHub repo       kepano/obsidian-minimal
  *   - a pre-3.0 id        tokyo-night, catppuccin.frappe  (+ its Style Settings preset)
  *   - a community name    Tokyo Night                     (Obsidian's theme registry)
+ *   - `default`           Obsidian's built-in theme (no theme CSS)
  *
  * Community themes are downloaded the way Obsidian installs them: the theme's
  * manifest at HEAD gives its version; theme.css comes from that GitHub release,
@@ -21,6 +22,8 @@ import { LEGACY_THEMES } from "../generated/legacy-themes";
 const REGISTRY_URL =
   "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/HEAD/community-css-themes.json";
 const DAY = 24 * 60 * 60 * 1000;
+/** Names for Obsidian's own theme (`default` was its pre-3.0 id). */
+const BUILT_IN = new Set(["default", "obsidian", "obsidian default"]);
 
 export interface CommunityTheme {
   name: string;
@@ -234,6 +237,15 @@ export async function resolveTheme(
     opts.cacheTtl ?? DAY,
   );
   const trimmed = spec.trim();
+
+  // Obsidian's built-in theme: app.css only. Checked first, so it works offline.
+  if (BUILT_IN.has(trimmed.toLowerCase()))
+    return {
+      name: "Obsidian default",
+      css: "",
+      modes: ["dark", "light"],
+      source: "built-in",
+    };
 
   // Local path
   const local = path.resolve(trimmed);

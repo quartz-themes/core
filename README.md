@@ -29,6 +29,7 @@ plugins:
 - a GitHub repository, for themes outside the registry: `kepano/obsidian-minimal`;
 - a URL to a `theme.css`, or a local path: `./themes/My Theme` (a folder with `theme.css`) or `./my-theme.css`;
 - an id from earlier versions (`tokyo-night`, `catppuccin.frappe`), which maps to the theme plus the Style Settings preset it used.
+- `default`, for Obsidian's built-in theme (no community theme).
 
 With Style Settings and a snippet:
 
