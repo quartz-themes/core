@@ -35,7 +35,7 @@ describe("selector rewriting", () => {
     const css = ".my-toggle h1 { color: red } .my-other h1 { color: blue }";
     assert.equal(
       conv(css, { bodyClasses: { "my-toggle": true, "my-other": false } }),
-      ":where(body):not(.qt-0) h1 { color: red }",
+      ":where(body):not(.qt-0) h1:where(.markdown-rendered *) { color: red }",
     );
   });
 
@@ -115,6 +115,56 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("bare headings style notes, not Quartz's chrome headings", () => {
+    assert.equal(
+      conv("h2 { color: var(--h2-color) }"),
+      "h2:where(.markdown-rendered *) { color: var(--h2-color) }",
+    );
+    assert.equal(
+      conv(".theme-dark h3::before { content: '#' }"),
+      ":where(body):is([saved-theme=\"dark\"] *) h3:where(.markdown-rendered *)::before { content: '#' }",
+    );
+    assert.equal(
+      conv(".markdown-rendered h2 { color: red }"),
+      ".markdown-rendered h2 { color: red }",
+    );
+  });
+
+  test("code blocks: Obsidian's language classes, Quartz's figures", () => {
+    assert.equal(
+      conv('pre[class*="language-"] { padding: 1em }'),
+      "pre[data-language] { padding: 1em }",
+    );
+    assert.equal(
+      conv(
+        '.markdown-rendered pre:not([class*="language-"]) { width: fit-content }',
+      ),
+      ".markdown-rendered pre:not([data-language]) { width: fit-content }",
+    );
+    assert.equal(
+      conv("code.language-js { color: red }"),
+      'code[data-language="js"] { color: red }',
+    );
+    assert.equal(
+      conv("figure { margin: 1em 40px }"),
+      "figure:where(:not([data-rehype-pretty-code-figure])) { margin: 1em 40px }",
+    );
+  });
+
+  test("Obsidian wrappers as subjects stay dropped, even with a type", () => {
+    assert.equal(
+      conv(
+        ".mod-vertical > .workspace-tab-container > div.workspace-leaf { min-width: 50vw }",
+      ),
+      "",
+    );
+    // The block wrapper's siblings are block wrappers too.
+    assert.equal(
+      conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 0 }"),
+      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: 0 }",
+    );
+  });
+
   test("scrollbar rules stay off the viewport", () => {
     assert.equal(
       conv("::-webkit-scrollbar { width: 8px }"),
@@ -181,6 +231,79 @@ describe("selector rewriting", () => {
       ),
       ".markdown-preview-view { color: red } body { padding: 1em; color: red }",
     );
+    // Themes set the file margins on .markdown-rendered too (same element), as
+    // margins, or behind a body class, which nests the subject in :is().
+    assert.equal(
+      conv(
+        ".markdown-rendered { padding: 24px 32px; margin: 0 15px; color: red }",
+      ),
+      ".markdown-rendered { color: red }",
+    );
+    assert.equal(
+      conv(
+        "body:not(.is-mobile) .markdown-preview-view { padding-left: 40px }",
+      ),
+      "",
+    );
+  });
+
+  test("the content root keeps Quartz's display and minimum width", () => {
+    assert.equal(
+      conv(
+        ".markdown-preview-view.is-readable-line-width .markdown-preview-sizer { max-width: 100%; display: flex }",
+      ),
+      ".markdown-preview-view:not(.qt-0):not(.qt-0) { max-width: 100% }",
+    );
+    assert.equal(
+      conv(
+        ".markdown-preview-view { min-width: 80ch; max-width: 50%; color: red }",
+      ),
+      ".markdown-preview-view { max-width: 50%; color: red }",
+    );
+  });
+
+  test("block wrappers don't stop Quartz's table container scrolling", () => {
+    assert.equal(
+      conv(
+        ".markdown-preview-sizer > :nth-child(2) ~ div { overflow: visible; color: red }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { color: red }",
+    );
+  });
+
+  test("sidebar splits never hold the note", () => {
+    // Blue Topaz shrinks notes opened in a sidebar split.
+    assert.equal(
+      conv(
+        "body:not(.default-split-style) .workspace>.workspace-split:not(.mod-root) .markdown-preview-sizer { font-size: 0.85em }",
+      ),
+      "",
+    );
+  });
+
+  test("margins that offset the content root are dropped; centring stays", () => {
+    // A content wrapper mapped onto the root (Nier's readable-width fix).
+    assert.equal(
+      conv(
+        ".markdown-preview-view.is-readable-line-width .markdown-preview-sizer { max-width: 700px; margin-left: 30px; margin-right: 30px }",
+      ),
+      ".markdown-preview-view:not(.qt-0):not(.qt-0) { max-width: 700px }",
+    );
+    assert.equal(
+      conv(".markdown-preview-view { max-width: 40rem; margin: 0 auto }"),
+      ".markdown-preview-view { max-width: 40rem; margin: 0 auto }",
+    );
+    assert.equal(conv(".markdown-preview-view { margin: 1em auto }"), "");
+  });
+
+  test("structural guard sees through :is() and covers opacity", () => {
+    assert.equal(
+      conv(
+        "@media (max-width: 800px) { body :is(.mod-left-split, .mod-right-split) { display: none; color: red } }",
+      ),
+      "@media (max-width: 800px) { body :is(:where(.left.sidebar):not(.qt-0),:where(.right.sidebar):not(.qt-0)) { color: red } }",
+    );
+    assert.equal(conv(".mod-left-split { opacity: 0 }"), "");
   });
 });
 

@@ -32,10 +32,15 @@ export const BRIDGE: Record<string, string> = {
  * backgrounds or callout borders. Reverting these elements to UA styles at
  * zero specificity — first thing in the obsidian layer — makes Obsidian's
  * rules the only author styles that apply, as in Obsidian. Custom properties
- * are unaffected by `all`.
+ * are unaffected by `all`. Quartz's code-block <figure> has no counterpart in
+ * Obsidian (its `pre` sits in the note directly), so it doesn't get the UA's
+ * 40px figure margins.
  */
 export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, input[type="checkbox"]) {
   all: revert;
+}
+:where(.markdown-preview-view) :where(figure[data-rehype-pretty-code-figure]) {
+  margin: 0;
 }
 `;
 
