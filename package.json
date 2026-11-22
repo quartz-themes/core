@@ -1,6 +1,6 @@
 {
   "name": "@quartz-themes/core",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Quartz transformer plugin: use any Obsidian community theme, converted at build time.",
   "type": "module",
   "license": "MIT",

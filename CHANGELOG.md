@@ -1,3 +1,11 @@
+## 3.0.1
+
+### Patch Changes
+
+- Page layout stays Quartz's: Obsidian's file margins no longer add 32px of padding inside
+  Quartz's gutters, and the content no longer reserves a scrollbar gutter (Obsidian's reading
+  view scrolls on its own; in Quartz the page does).
+
 ## 3.0.0
 
 ### Major Changes
