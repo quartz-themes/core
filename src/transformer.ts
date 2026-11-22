@@ -11,7 +11,6 @@ import path from "node:path";
 import type {
   CSSResource,
   JSResource,
-  StaticAsset,
   QuartzTransformerPluginInstance,
 } from "@quartz-community/types";
 import { convertTheme, extractFontData } from "./convert";
@@ -55,6 +54,15 @@ export function loadStyleSettings(
   if (typeof input === "string")
     return JSON.parse(fs.readFileSync(input, "utf-8")) as StyleSettingsExport;
   return input;
+}
+
+/**
+ * A file Quartz 5.1+ copies to static/plugins/<to> (externalResources().assets).
+ * Declared here, like AsyncTransformerPlugin, so core works with older types.
+ */
+interface StaticAsset {
+  from: string;
+  to: string;
 }
 
 /** Below static/plugins/ (Quartz 5.1+ copies plugin assets there). */
@@ -194,7 +202,8 @@ export const QuartzTheme: AsyncTransformerPlugin<
       return src;
     },
     externalResources() {
-      return { css, js, additionalHead: [], assets };
+      const resources = { css, js, additionalHead: [], assets };
+      return resources;
     },
   };
 };
