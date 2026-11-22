@@ -1,3 +1,24 @@
+## 3.0.1
+
+### Patch Changes
+
+- Page layout stays Quartz's: Obsidian's file margins no longer add 32px of padding inside
+  Quartz's gutters, and the content no longer reserves a scrollbar gutter (Obsidian's reading
+  view scrolls on its own; in Quartz the page does).
+- The same goes for a theme's own padding, margins, `display` or `min-width` on the reading
+  view, `.markdown-rendered` or `.markdown-preview-sizer`, including behind body-class
+  `:is()`; `auto` margins still centre a readable line width.
+- Code blocks span the note column: the UA's 40px `<figure>` margins no longer apply, theme
+  `figure` rules skip Quartz's code-block figure, and `.language-*` / `[class*="language-"]`
+  selectors match Quartz's `[data-language]`.
+- Theme rules can no longer hide or restyle Quartz's chrome: bare `h1`–`h6` rules apply inside
+  the note only (the page title keeps Quartz's styling), side-panel rules behind `:is()` and
+  `opacity` are guarded like other layout properties, and `div.workspace-leaf`-style rules no
+  longer match every `div`.
+- Rules for Obsidian's per-block wrappers apply to Quartz's top-level blocks, including through
+  sibling combinators, without stopping wide tables from scrolling; rules for notes open in a
+  sidebar split are dropped.
+
 ## 3.0.0
 
 ### Major Changes

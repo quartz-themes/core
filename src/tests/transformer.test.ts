@@ -49,6 +49,11 @@ describe("QuartzTheme", () => {
       /3\.33em/,
       "disabled Style Settings toggles are statically false",
     );
+    assert.match(
+      main,
+      /:where\(figure\[data-rehype-pretty-code-figure\]\) \{\s*margin: 0;/,
+      "the content reset doesn't give code blocks the UA's figure margins",
+    );
   });
 
   test("applies Style Settings from options", async () => {
@@ -63,7 +68,7 @@ describe("QuartzTheme", () => {
     );
     assert.match(
       main,
-      /:where\(body\):not\(\.qt-0\) h1 \{\s*font-size: 3\.33em/,
+      /:where\(body\):not\(\.qt-0\) h1:where\(\.markdown-rendered \*\) \{\s*font-size: 3\.33em/,
     );
   });
 

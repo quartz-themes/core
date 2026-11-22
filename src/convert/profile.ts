@@ -116,16 +116,25 @@ export const CONTENT_ROOT_CLASSES = [
 ];
 
 /**
- * Bare form-control rules (`button { … }`) style Obsidian's own UI. In Quartz,
- * every button is Quartz chrome (dark mode toggle, explorer, copy-code, …),
- * which Quartz styles itself, so bare button/select/textarea rules are dropped
- * and bare input rules (task checkboxes) are scoped to note content.
+ * Bare element rules that would reach Quartz chrome. Form controls
+ * (`button { … }`) style Obsidian's own UI; in Quartz every button is chrome
+ * (dark mode toggle, explorer, copy-code, …), which Quartz styles itself, so
+ * bare button/select/textarea rules are dropped and bare input rules (task
+ * checkboxes) are scoped to note content. Bare headings are meant for notes
+ * (Obsidian's UI has none to speak of), while Quartz's page title, explorer,
+ * graph and table-of-contents titles are headings: scoped to note content.
  */
-export const FORM_CONTROLS: Record<string, "drop" | "content"> = {
+export const BARE_TAGS: Record<string, "drop" | "content"> = {
   button: "drop",
   select: "drop",
   textarea: "drop",
   input: "content",
+  h1: "content",
+  h2: "content",
+  h3: "content",
+  h4: "content",
+  h5: "content",
+  h6: "content",
 };
 
 /** Wrapper classes that do have a Quartz counterpart. */
@@ -176,7 +185,15 @@ export const TAG_REWRITES: Record<
 > = {
   // Quartz renders ==highlight== as <span class="text-highlight">.
   mark: { replace: ":where(mark, .text-highlight)" },
+  // Obsidian renders no <figure>s of its own; Quartz wraps code blocks in one.
+  figure: { qualify: ":where(:not([data-rehype-pretty-code-figure]))" },
 };
+
+/**
+ * Obsidian marks highlighted code (`pre`, `code`) with `language-<lang>`
+ * classes; Quartz with `data-language="<lang>"`.
+ */
+export const LANGUAGE_CLASS_PREFIX = "language-";
 
 /**
  * Body classes of Obsidian in reading view on desktop. true = present,

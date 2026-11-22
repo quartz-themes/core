@@ -22,6 +22,7 @@ import postcss, {
   type AtRule,
   type ChildNode,
   type Container,
+  type Declaration,
   type Root,
   type Rule,
 } from "postcss";
@@ -44,7 +45,8 @@ import {
   CONTENT_WRAPPERS,
   CONTENT_ROOT,
   CONTENT_ROOT_CLASSES,
-  FORM_CONTROLS,
+  BARE_TAGS,
+  LANGUAGE_CLASS_PREFIX,
   isAppOnly,
 } from "./profile";
 
@@ -270,6 +272,9 @@ export function convertObsidianCss(
     let dropReason: DropReason | null = null;
     let out: string;
     const structuralSels: string[] = [];
+    const contentRootSels: string[] = [];
+    const mappedRootSels: string[] = [];
+    const blockWrapperSels: string[] = [];
     try {
       out = selectorParser((selectors) => {
         selectors.each((sel) => {
@@ -282,6 +287,9 @@ export function convertObsidianCss(
           } else {
             if (res.changed) changed = true;
             if (res.structural) structuralSels.push(sel.toString().trim());
+            if (res.contentRoot) contentRootSels.push(sel.toString().trim());
+            if (res.mappedRoot) mappedRootSels.push(sel.toString().trim());
+            if (res.blockWrapper) blockWrapperSels.push(sel.toString().trim());
           }
         });
       }).processSync(rule.selector, { lossless: false });
@@ -301,8 +309,20 @@ export function convertObsidianCss(
     } else {
       stats.keptVerbatim++;
     }
-    if (structuralSels.length)
-      stats.layoutStripped += guardLayout(rule, structuralSels);
+    const guards: [string[], (d: Declaration) => boolean][] = [
+      [structuralSels, (d) => LAYOUT_PROPS.test(d.prop)],
+      [contentRootSels, isContentRootLayout],
+      [mappedRootSels, isMappedRootLayout],
+      [blockWrapperSels, (d) => OVERFLOW_PROPS.test(d.prop)],
+    ];
+    let parts = [rule];
+    for (const [sels, props] of guards)
+      if (sels.length)
+        parts = parts.flatMap((r) => {
+          const res = guardLayout(r, sels, props);
+          stats.layoutStripped += res.stripped;
+          return res.rules;
+        });
     for (const m of out.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
       const c = m[1]!;
       if (c.startsWith("qt-") || quartzClasses.has(c)) continue;
@@ -354,32 +374,86 @@ export function convertObsidianCss(
 /**
  * Properties that control page layout. Quartz owns the layout of its
  * structural elements (html, body, sidebars, header, footer); a theme only
- * gets to style them.
+ * gets to style them. (Opacity too: themes fade Obsidian's side panels until
+ * hovered, but Quartz's left sidebar is the header on phones.)
  */
 const LAYOUT_PROPS =
-  /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|translate|scale|rotate|zoom|visibility|user-select|-webkit-user-select|pointer-events|z-index)$/;
+  /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|translate|scale|rotate|zoom|visibility|opacity|user-select|-webkit-user-select|pointer-events|z-index)$/;
 
 /**
- * Strip layout declarations that apply to structural selectors. Rules whose
- * selector list mixes structural and non-structural selectors are split so
- * only the structural part is affected. Returns the number of stripped decls.
+ * Quartz's content root is laid out by Quartz: the page provides the gutters
+ * (Obsidian's file margins, or a theme's own padding or margins on the reading
+ * view, would double them) and the page scrolls (in Obsidian the reading view
+ * is its own scroll container, whose `scrollbar-gutter: stable` would reserve
+ * a themed scrollbar's width).
  */
-function guardLayout(rule: Rule, structuralSels: string[]): number {
-  const layoutDecls = rule.nodes.filter(
-    (d) => d.type === "decl" && LAYOUT_PROPS.test(d.prop),
+const CONTENT_ROOT_PROPS =
+  /^(padding(-(top|right|bottom|left|inline|block)(-(start|end))?)?|overflow(-[xy])?|scrollbar-gutter)$/;
+/**
+ * Obsidian's per-block wrapper divs never scroll, but in Quartz some top-level
+ * blocks do: `.table-container` scrolls wide tables (Material Ocean's
+ * `overflow: visible` on the wrappers would spill them off a phone).
+ */
+const OVERFLOW_PROPS = /^overflow(-[xy])?$/;
+const MARGIN_PROPS =
+  /^margin(-(top|right|bottom|left|inline|block)(-(start|end))?)?$/;
+
+/**
+ * A margin that offsets the content root. `auto` and 0 are kept: with a
+ * max-width they centre the note in Quartz's column (Minimal, Dedication);
+ * lengths push it out of the column (`width: 100%` plus `margin: 0 30px`).
+ */
+const isOffsetMargin = (d: Declaration) =>
+  MARGIN_PROPS.test(d.prop) &&
+  d.value
+    .trim()
+    .split(/\s+/)
+    .some(
+      (v) =>
+        !/^(auto|0([a-z%]*)?|initial|unset|inherit|revert(-layer)?)$/i.test(v),
+    );
+
+/**
+ * The root's box is Quartz's column: a theme's `display: flex` on the sizer
+ * would lay the note's blocks out in a row (SpectrumPlus), and a `min-width`
+ * pushes it past a phone's screen (evangelion's `min-width: 80ch`).
+ */
+const ROOT_BOX_PROPS = /^(display|min-width|min-inline-size)$/;
+const isMappedRootLayout = (d: Declaration) =>
+  ROOT_BOX_PROPS.test(d.prop) || isOffsetMargin(d);
+const isContentRootLayout = (d: Declaration) =>
+  CONTENT_ROOT_PROPS.test(d.prop) || isMappedRootLayout(d);
+
+/**
+ * Strip the `props` declarations that apply to the selectors in `guarded`.
+ * Rules whose selector list mixes guarded and other selectors are split so
+ * only the guarded part is affected. Returns the number of stripped decls and
+ * the rules left in the stylesheet.
+ */
+function guardLayout(
+  rule: Rule,
+  guarded: string[],
+  strip: (d: Declaration) => boolean,
+): { stripped: number; rules: Rule[] } {
+  const decls = rule.nodes.filter(
+    (d): d is Declaration => d.type === "decl" && strip(d),
   );
-  if (!layoutDecls.length) return 0;
+  if (!decls.length) return { stripped: 0, rules: [rule] };
   const all = selectorParser()
     .astSync(rule.selector)
     .nodes.map((s) => s.toString().trim());
-  const rest = all.filter((s) => !structuralSels.includes(s));
+  const hit = all.filter((s) => guarded.includes(s));
+  if (!hit.length) return { stripped: 0, rules: [rule] };
+  const rules: Rule[] = [];
+  const rest = all.filter((s) => !guarded.includes(s));
   if (rest.length) {
-    rule.cloneBefore({ selector: rest.join(", ") });
-    rule.selector = structuralSels.join(", ");
+    rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
+    rule.selector = hit.join(", ");
   }
-  for (const d of layoutDecls) d.remove();
+  for (const d of decls) d.remove();
   if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
-  return layoutDecls.length;
+  else rules.push(rule);
+  return { stripped: decls.length, rules };
 }
 
 /** The targets Quartz minifies plugin CSS with (quartz/plugins/emitters/componentResources.ts). */
@@ -469,6 +543,14 @@ interface SelectorResult {
   drop?: DropReason;
   changed?: boolean;
   structural?: boolean;
+  /** The subject is Obsidian's reading view itself (`.markdown-preview-view`), i.e. Quartz's content root. */
+  contentRoot?: boolean;
+  /** As `contentRoot`, also for selectors nested in :is()/:where(). */
+  subjectIsRoot?: boolean;
+  /** The subject is a content wrapper mapped onto the root (`.markdown-preview-sizer`). */
+  mappedRoot?: boolean;
+  /** The subject is Obsidian's per-block wrapper div, i.e. a top-level block in Quartz. */
+  blockWrapper?: boolean;
 }
 
 interface Compound {
@@ -543,6 +625,8 @@ function processSelector(
   // `.markdown-preview-view .markdown-preview-sizer > div` → `.markdown-preview-view:not(.qt-0) > div`;
   // `.markdown-preview-sizer > div` → `:where(.markdown-preview-view):not(.qt-0) > div`.
   // Right to left, so merging compound i into i-1 leaves earlier indices valid.
+  const subjectMapped = toContentRoot(results[results.length - 1]!);
+  let blockSubject = false;
   for (let i = compounds.length - 1; i >= 0; i--) {
     const r = results[i]!;
     if (!toContentRoot(r)) continue;
@@ -575,26 +659,43 @@ function processSelector(
     const wrapper = splitCompounds(sel)[rootIdx + 1];
     if (!wrapper || !isChild(wrapper.before)) continue;
     // Only a bare `div` / `*`, optionally with pseudos (`:has(img)`, `::before`).
-    if (
-      !wrapper.nodes.every(
+    const bareWrapper = (c: Compound) =>
+      c.nodes.every(
         (n) =>
           (n.type === "tag" && n.value.toLowerCase() === "div") ||
           n.type === "universal" ||
           n.type === "pseudo",
-      )
+      );
+    if (!bareWrapper(wrapper)) continue;
+    const unwrap = (c: Compound) => {
+      for (const n of c.nodes) {
+        if (n.type === "tag") {
+          for (const p of pad([0, 0, 1])) n.parent!.insertBefore(n, p);
+          n.remove();
+        } else if (n.type === "universal") n.remove();
+      }
+    };
+    unwrap(wrapper);
+    // Its siblings are block wrappers too: `sizer > :nth-child(2) ~ div`.
+    const isSibling = (c?: selectorParser.Combinator) =>
+      c !== undefined && /^[~+]$/.test(c.value.trim());
+    let last = rootIdx + 1;
+    for (
+      let j = rootIdx + 2, all = splitCompounds(sel);
+      j < all.length && isSibling(all[j]!.before) && bareWrapper(all[j]!);
+      j++
     )
-      continue;
-    for (const n of wrapper.nodes) {
-      if (n.type === "tag") {
-        for (const p of pad([0, 0, 1])) n.parent!.insertBefore(n, p);
-        n.remove();
-      } else if (n.type === "universal") n.remove();
-    }
+      unwrap(all[(last = j)]!);
     const fresh = splitCompounds(sel);
+    if (last === fresh.length - 1) blockSubject = true;
     const w = fresh[rootIdx + 1]!;
     const isPadding = (n: SNode) =>
       n.type === "pseudo" && n.value === ":not" && /qt-0\)$/.test(String(n));
-    if (rootIdx + 1 < fresh.length - 1 && w.nodes.every(isPadding)) {
+    if (
+      rootIdx + 1 < fresh.length - 1 &&
+      !isSibling(fresh[rootIdx + 2]?.before) &&
+      w.nodes.every(isPadding)
+    ) {
       // Elide: move its specificity onto the root compound, drop `> wrapper`.
       const rootLast = fresh[rootIdx]!.nodes.at(-1)!;
       for (const n of [...w.nodes].reverse()) {
@@ -605,13 +706,11 @@ function processSelector(
     }
   }
 
-  // Bare form controls style Obsidian's UI; in Quartz they would hit chrome.
+  // Bare form controls and headings: in Quartz they would hit chrome.
   if (top) {
     const subject = results[results.length - 1]!;
     const ancestorsConcrete = results.slice(0, -1).some((r) => r.concrete);
-    const control = (subject.tags ?? [])
-      .map((t) => FORM_CONTROLS[t])
-      .find(Boolean);
+    const control = (subject.tags ?? []).map((t) => BARE_TAGS[t]).find(Boolean);
     if (control && !subject.named && !ancestorsConcrete) {
       if (control === "drop") return { drop: "appOnly" };
       const last = splitCompounds(sel).at(-1)!.nodes;
@@ -649,7 +748,19 @@ function processSelector(
 
   // `.workspace .workspace-tab-container > *` → nothing Quartz-specific left.
   if (anyElided && !anyConcrete) return { drop: "wrapperSubject" };
-  return { changed, structural };
+  // From the original subject compound, so a content wrapper mapped onto the
+  // root (`.markdown-preview-sizer`) keeps its own padding: in Obsidian that
+  // sits inside the file margins.
+  const subject = results[results.length - 1]!;
+  const subjectIsRoot = !!subject.contentRoot;
+  return {
+    changed,
+    structural,
+    contentRoot: top && subjectIsRoot,
+    subjectIsRoot,
+    mappedRoot: top && !subjectIsRoot && subjectMapped,
+    blockWrapper: top && blockSubject,
+  };
 }
 
 interface CompoundResult {
@@ -667,6 +778,8 @@ interface CompoundResult {
   tags?: string[];
   /** Matches the root element (`html`, `:root`). */
   rootish?: boolean;
+  /** Matches only Quartz's content root (a content-root class, or :is() of such). */
+  contentRoot?: boolean;
 }
 
 function processCompound(
@@ -683,6 +796,7 @@ function processCompound(
   let hasRootish = false;
   let named = false;
   let content = false;
+  let contentRoot = false;
   const tags: string[] = [];
   const hasClass = (c: string) =>
     nodes.some((n) => n.type === "class" && n.value === c);
@@ -690,6 +804,17 @@ function processCompound(
   const container = nodes[0]?.parent;
   const startIdx = container && nodes[0] ? container.index(nodes[0]) : -1;
   const hasLeaf = hasClass("workspace-leaf-content");
+  // `.workspace-split:not(.mod-root)` is a sidebar split; Quartz's note is
+  // always in the root split.
+  const sideSplit =
+    hasClass("workspace-split") &&
+    nodes.some(
+      (n) =>
+        n.type === "pseudo" &&
+        n.value === ":not" &&
+        n.nodes.some((s) => String(s).trim() === ".mod-root"),
+    );
+  if (sideSplit) return { drop: "staticFalse" };
 
   const replace = (node: SNode, newNodes: SNode[]) => {
     for (const n of newNodes) node.parent!.insertBefore(node, n);
@@ -718,6 +843,11 @@ function processCompound(
           replace(node, pad(CLASS_SPEC));
           wrapper = true;
           if (CONTENT_WRAPPERS.has(v)) content = true;
+        } else if (v.startsWith(LANGUAGE_CLASS_PREFIX)) {
+          // `.language-js` → `[data-language="js"]` (same specificity).
+          const lang = v.slice(LANGUAGE_CLASS_PREFIX.length);
+          replace(node, nodesOf(`[data-language="${lang}"]`));
+          concrete = named = true;
         } else if (isAppOnly(v)) {
           return { drop: "appOnly" };
         } else if (
@@ -731,6 +861,7 @@ function processCompound(
           concrete = named = true;
         } else {
           concrete = named = true;
+          if (CONTENT_ROOT_CLASSES.includes(v)) contentRoot = true;
         }
         break;
       }
@@ -745,6 +876,24 @@ function processCompound(
               : pad(CLASS_SPEC),
           );
           if (target) concrete = named = true;
+        } else if (
+          node.attribute.toLowerCase() === "class" &&
+          node.value?.startsWith(LANGUAGE_CLASS_PREFIX) &&
+          ["*=", "^=", "~=", "|=", "="].includes(node.operator ?? "")
+        ) {
+          // `[class*="language-"]` → `[data-language]`; an exact language
+          // (`[class~="language-js"]`) → `[data-language="js"]`.
+          const lang = node.value.slice(LANGUAGE_CLASS_PREFIX.length);
+          const exact =
+            lang &&
+            (node.operator === "~=" ||
+              node.operator === "=" ||
+              node.operator === "|=");
+          replace(
+            node,
+            nodesOf(exact ? `[data-language="${lang}"]` : "[data-language]"),
+          );
+          concrete = named = true;
         } else {
           concrete = true;
           if (node.attribute.toLowerCase() !== "type") named = true;
@@ -789,6 +938,9 @@ function processCompound(
           if (res.drop) return { drop: res.drop };
           if (res.changed) changed = true;
           if (res.concrete) concrete = named = true;
+          // `:is(.left.sidebar, .right.sidebar)` is as structural as either.
+          if (res.structural) structuralTarget = true;
+          if (res.contentRoot) contentRoot = true;
         } else if (node.value === ":root") {
           concrete = true;
           hasRootish = true;
@@ -813,8 +965,16 @@ function processCompound(
       container!.insertBefore(first, nodesOf(":where(body)")[0]!);
       changed = true;
     }
-  } else if (isSubject && wrapper && !concrete && !bodyish) {
+  } else if (
+    isSubject &&
+    wrapper &&
+    !content &&
+    !named &&
+    !bodyish &&
+    !structuralTarget
+  ) {
     // e.g. `.workspace-leaf-content { background }` — no Quartz equivalent.
+    // A type selector doesn't help: `div.workspace-leaf` would be any div.
     return { drop: "wrapperSubject" };
   }
   return {
@@ -827,6 +987,7 @@ function processCompound(
     content,
     tags,
     rootish: hasRootish,
+    contentRoot,
   };
 }
 
@@ -834,6 +995,8 @@ function processCompound(
 function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
   let changed = false;
   let concrete = false;
+  let allStructural = true;
+  let allContentRoot = true;
   for (const inner of [...node.nodes]) {
     const res = processSelector(inner, ctx);
     if (res.drop) {
@@ -842,6 +1005,8 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
     } else {
       concrete = true;
       if (res.changed) changed = true;
+      if (!res.structural) allStructural = false;
+      if (!res.subjectIsRoot) allContentRoot = false;
     }
   }
   if (node.nodes.length === 0) {
@@ -855,5 +1020,12 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
     // :is()/:where()/:has() with no matching alternative → never matches.
     return { drop: "staticFalse" };
   }
-  return { changed, concrete: concrete && node.value !== ":not" };
+  // Only alternatives (:is/:where), not :not/:has, say what the subject is.
+  const alternatives = node.value !== ":not" && node.value !== ":has";
+  return {
+    changed,
+    concrete: concrete && node.value !== ":not",
+    structural: alternatives && concrete && allStructural,
+    contentRoot: alternatives && concrete && allContentRoot,
+  };
 }
