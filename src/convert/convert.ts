@@ -270,6 +270,7 @@ export function convertObsidianCss(
     let dropReason: DropReason | null = null;
     let out: string;
     const structuralSels: string[] = [];
+    const contentRootSels: string[] = [];
     try {
       out = selectorParser((selectors) => {
         selectors.each((sel) => {
@@ -282,6 +283,7 @@ export function convertObsidianCss(
           } else {
             if (res.changed) changed = true;
             if (res.structural) structuralSels.push(sel.toString().trim());
+            if (res.contentRoot) contentRootSels.push(sel.toString().trim());
           }
         });
       }).processSync(rule.selector, { lossless: false });
@@ -301,8 +303,18 @@ export function convertObsidianCss(
     } else {
       stats.keptVerbatim++;
     }
-    if (structuralSels.length)
-      stats.layoutStripped += guardLayout(rule, structuralSels);
+    const guards: [string[], RegExp][] = [
+      [structuralSels, LAYOUT_PROPS],
+      [contentRootSels, CONTENT_ROOT_PROPS],
+    ];
+    let parts = [rule];
+    for (const [sels, props] of guards)
+      if (sels.length)
+        parts = parts.flatMap((r) => {
+          const res = guardLayout(r, sels, props);
+          stats.layoutStripped += res.stripped;
+          return res.rules;
+        });
     for (const m of out.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
       const c = m[1]!;
       if (c.startsWith("qt-") || quartzClasses.has(c)) continue;
@@ -360,26 +372,44 @@ const LAYOUT_PROPS =
   /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|translate|scale|rotate|zoom|visibility|user-select|-webkit-user-select|pointer-events|z-index)$/;
 
 /**
- * Strip layout declarations that apply to structural selectors. Rules whose
- * selector list mixes structural and non-structural selectors are split so
- * only the structural part is affected. Returns the number of stripped decls.
+ * Quartz's content root is laid out by Quartz: the page provides the gutters
+ * (Obsidian's file margins would double them) and the page scrolls (in
+ * Obsidian the reading view is its own scroll container, whose
+ * `scrollbar-gutter: stable` would reserve a themed scrollbar's width).
  */
-function guardLayout(rule: Rule, structuralSels: string[]): number {
-  const layoutDecls = rule.nodes.filter(
-    (d) => d.type === "decl" && LAYOUT_PROPS.test(d.prop),
+const CONTENT_ROOT_PROPS =
+  /^(padding(-(top|right|bottom|left|inline|block)(-(start|end))?)?|overflow(-[xy])?|scrollbar-gutter)$/;
+
+/**
+ * Strip the `props` declarations that apply to the selectors in `guarded`.
+ * Rules whose selector list mixes guarded and other selectors are split so
+ * only the guarded part is affected. Returns the number of stripped decls and
+ * the rules left in the stylesheet.
+ */
+function guardLayout(
+  rule: Rule,
+  guarded: string[],
+  props: RegExp,
+): { stripped: number; rules: Rule[] } {
+  const decls = rule.nodes.filter(
+    (d) => d.type === "decl" && props.test(d.prop),
   );
-  if (!layoutDecls.length) return 0;
+  if (!decls.length) return { stripped: 0, rules: [rule] };
   const all = selectorParser()
     .astSync(rule.selector)
     .nodes.map((s) => s.toString().trim());
-  const rest = all.filter((s) => !structuralSels.includes(s));
+  const hit = all.filter((s) => guarded.includes(s));
+  if (!hit.length) return { stripped: 0, rules: [rule] };
+  const rules: Rule[] = [];
+  const rest = all.filter((s) => !guarded.includes(s));
   if (rest.length) {
-    rule.cloneBefore({ selector: rest.join(", ") });
-    rule.selector = structuralSels.join(", ");
+    rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
+    rule.selector = hit.join(", ");
   }
-  for (const d of layoutDecls) d.remove();
+  for (const d of decls) d.remove();
   if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
-  return layoutDecls.length;
+  else rules.push(rule);
+  return { stripped: decls.length, rules };
 }
 
 /** The targets Quartz minifies plugin CSS with (quartz/plugins/emitters/componentResources.ts). */
@@ -469,6 +499,8 @@ interface SelectorResult {
   drop?: DropReason;
   changed?: boolean;
   structural?: boolean;
+  /** The subject is Obsidian's reading view itself (`.markdown-preview-view`), i.e. Quartz's content root. */
+  contentRoot?: boolean;
 }
 
 interface Compound {
@@ -649,7 +681,15 @@ function processSelector(
 
   // `.workspace .workspace-tab-container > *` → nothing Quartz-specific left.
   if (anyElided && !anyConcrete) return { drop: "wrapperSubject" };
-  return { changed, structural };
+  // Checked on the original subject compound, so a content wrapper mapped onto
+  // the root (`.markdown-preview-sizer`) keeps its own padding: in Obsidian
+  // that sits inside the file margins.
+  const contentRoot =
+    top &&
+    compounds[compounds.length - 1]!.nodes.some(
+      (n) => n.type === "class" && n.value === CONTENT_ROOT_CLASSES[0],
+    );
+  return { changed, structural, contentRoot };
 }
 
 interface CompoundResult {

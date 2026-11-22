@@ -155,6 +155,33 @@ describe("selector rewriting", () => {
     );
     assert.equal(conv("html, body { height: 100% }"), "");
   });
+
+  test("the content root keeps Quartz's gutters and page scrolling", () => {
+    assert.equal(
+      conv(
+        ".markdown-preview-view { padding: var(--file-margins); overflow-y: auto; scrollbar-gutter: stable; width: 100% }",
+      ),
+      ".markdown-preview-view { width: 100% }",
+    );
+    assert.equal(
+      conv(
+        ".markdown-preview-view.is-readable-line-width, .callout { padding-inline: 2em; padding-top: 1em; color: red }",
+      ),
+      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red }",
+    );
+    // Descendants keep theirs.
+    assert.equal(
+      conv(".markdown-preview-view p { padding: 1em; overflow: auto }"),
+      ".markdown-preview-view p { padding: 1em; overflow: auto }",
+    );
+    // Both guards on one rule.
+    assert.equal(
+      conv(
+        "body, .markdown-preview-view { padding: 1em; overflow: hidden; color: red }",
+      ),
+      ".markdown-preview-view { color: red } body { padding: 1em; color: red }",
+    );
+  });
 });
 
 describe("robustness", () => {
