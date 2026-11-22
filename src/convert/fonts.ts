@@ -148,6 +148,7 @@ export function pruneFonts(sheets: string[]): {
   for (const root of roots)
     root.walkAtRules(/^font-face$/i, (at) => {
       let srcs = 0;
+      let dropped = 0;
       at.walkDecls(/^src$/i, (d) => {
         const kept = splitSources(d.value).filter(
           (s) => !(/^url\(/i.test(s) && RELATIVE_URL.test(s)),
@@ -155,9 +156,13 @@ export function pruneFonts(sheets: string[]): {
         if (kept.length) {
           srcs++;
           d.value = kept.join(", ");
-        } else d.remove();
+        } else {
+          dropped++;
+          d.remove();
+        }
       });
-      if (!srcs) {
+      // A face without any `src` (app.css's "??" placeholder) is left alone.
+      if (dropped && !srcs) {
         report.unresolvable.push(familyOf(at));
         report.bytes += at.toString().length;
         at.remove();

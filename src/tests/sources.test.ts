@@ -51,6 +51,17 @@ describe("resolveTheme", () => {
     assert.equal(t.css, "/* release */");
   });
 
+  test("default is Obsidian's built-in theme, without a download", async () => {
+    const calls: string[] = [];
+    const fetch = mockFetch({}, calls);
+    for (const spec of ["default", "Default", " obsidian "]) {
+      const t = await resolveTheme(spec, { cacheDir, fetch });
+      assert.equal(t.css, "");
+      assert.deepEqual(t.modes, ["dark", "light"]);
+    }
+    assert.deepEqual(calls, []);
+  });
+
   test("falls back to the default branch, then obsidian.css (also for unflagged themes)", async () => {
     const fetch = mockFetch({
       [registryUrl]: JSON.stringify(REGISTRY),
