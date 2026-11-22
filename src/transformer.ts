@@ -5,14 +5,15 @@
  * downloads it if needed, and converts it with the static converter before
  * the build starts. CSS is then injected through externalResources().
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
-import postcss from "postcss";
+import path from "node:path";
 import type {
   CSSResource,
   JSResource,
   QuartzTransformerPluginInstance,
 } from "@quartz-community/types";
-import { convertTheme } from "./convert";
+import { convertTheme, extractFontData } from "./convert";
 import { resolveSnippet, resolveTheme } from "./sources";
 import type { StyleSettingsExport, ThemeOptions } from "./types";
 
@@ -55,18 +56,17 @@ export function loadStyleSettings(
   return input;
 }
 
-/** Remove the theme's web fonts (themeFonts: false). */
-function stripFonts(css: string): string {
-  const root = postcss.parse(css);
-  root.walkAtRules(/^(font-face|import)$/i, (at) => {
-    if (
-      at.name.toLowerCase() === "font-face" ||
-      /fonts?\b|\.woff|\.ttf|\.otf/i.test(at.params)
-    )
-      at.remove();
-  });
-  return root.toString();
+/**
+ * A file Quartz 5.1+ copies to static/plugins/<to> (externalResources().assets).
+ * Declared here, like AsyncTransformerPlugin, so core works with older types.
+ */
+interface StaticAsset {
+  from: string;
+  to: string;
 }
+
+/** Below static/plugins/ (Quartz 5.1+ copies plugin assets there). */
+const FONT_ASSET_DIR = "quartz-themes/fonts";
 
 const log = (msg: string) => console.log(`[QuartzTheme] ${msg}`);
 
@@ -108,7 +108,12 @@ export const QuartzTheme: AsyncTransformerPlugin<
   };
 
   const t0 = performance.now();
-  const result = convertTheme({ themeCss: theme.css, styleSettings, snippets });
+  const result = convertTheme({
+    themeCss: theme.css,
+    styleSettings,
+    snippets,
+    themeFonts: options.themeFonts !== false,
+  });
   const s = result.report.theme;
   log(
     `${theme.name}${theme.version ? ` ${theme.version}` : ""}: ${s.rules} rules converted in ${Math.round(performance.now() - t0)} ms` +
@@ -123,6 +128,18 @@ export const QuartzTheme: AsyncTransformerPlugin<
     );
   }
 
+  const f = result.report.fonts;
+  if (f.bytes)
+    log(
+      `dropped ${[
+        f.unused.length && `${f.unused.length} unused font families`,
+        f.unresolvable.length &&
+          `${f.unresolvable.length} fonts whose files aren't part of the theme`,
+      ]
+        .filter(Boolean)
+        .join(" and ")} (${Math.round(f.bytes / 1024)} KB)`,
+    );
+
   // Modes: honour what the theme supports.
   let mode = options.mode;
   const supported = theme.modes;
@@ -132,12 +149,32 @@ export const QuartzTheme: AsyncTransformerPlugin<
     mode = supported[0]!;
   }
 
-  let main = result.main;
-  let raw = result.raw;
-  if (options.themeFonts === false) {
-    main = stripFonts(main);
-    raw = raw && stripFonts(raw);
-  } else {
+  // Embedded fonts become files next to the stylesheet Quartz extracts the
+  // theme CSS into (static/resource-style-*.css → static/plugins/…).
+  const fontDir = path.join(
+    options.cacheDir ?? path.resolve(".quartz-cache/quartz-themes"),
+    "fonts",
+  );
+  const assets: StaticAsset[] = [];
+  const hash = (data: Uint8Array) =>
+    crypto.createHash("sha256").update(data).digest("hex").slice(0, 20);
+  const extract = (css: string) => {
+    const out = extractFontData(css, `plugins/${FONT_ASSET_DIR}`, hash);
+    if (out.files.length) fs.mkdirSync(fontDir, { recursive: true });
+    for (const f of out.files) {
+      const file = path.join(fontDir, f.name);
+      if (!fs.existsSync(file)) fs.writeFileSync(file, f.data);
+      assets.push({ from: file, to: `${FONT_ASSET_DIR}/${f.name}` });
+    }
+    return out.css;
+  };
+  const main = extract(result.main);
+  const raw = result.raw && extract(result.raw);
+  if (assets.length)
+    log(
+      `${assets.length} embedded fonts moved to static/plugins/${FONT_ASSET_DIR}`,
+    );
+  if (options.themeFonts !== false) {
     (globalThis as Record<string, unknown>).__quartzFonts = {
       themeName: theme.name,
       fonts: extractFontVars(result.themeCss),
@@ -165,7 +202,8 @@ export const QuartzTheme: AsyncTransformerPlugin<
       return src;
     },
     externalResources() {
-      return { css, js, additionalHead: [] };
+      const resources = { css, js, additionalHead: [], assets };
+      return resources;
     },
   };
 };

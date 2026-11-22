@@ -9,6 +9,7 @@
  * plus a bridge that points Quartz's own variables at Obsidian's, so
  * Quartz-only components (graph, search, explorer chrome…) follow the theme.
  */
+import { QUARTZ_FONT_BRIDGE } from "./fonts";
 
 /** Quartz variable → Obsidian variable. Defined on <body>, where Obsidian defines its vars. */
 export const BRIDGE: Record<string, string> = {
@@ -134,12 +135,32 @@ export function resetCss(): string {
   return `:where(body) {\n${QUARTZ_OBSIDIAN_VARS.map((v) => `  ${v}: initial;`).join("\n")}\n}\n`;
 }
 
-export function bridgeCss(): string {
-  const decls = Object.entries(BRIDGE)
-    .map(([k, v]) => `  ${k}: ${v};`)
-    .join("\n");
+/** Quartz font variables the bridge points at Obsidian's (not with `quartzFonts`). */
+const FONT_BRIDGE_KEYS = new Set(["--bodyFont", "--headerFont", "--codeFont"]);
+
+/**
+ * @param quartzFonts the site's Quartz fonts replace the theme's, so Quartz's
+ *   font variables mustn't point at Obsidian's (see quartzFontsCss).
+ */
+export function bridgeCss(quartzFonts = false): string {
+  const entries = Object.entries(BRIDGE).filter(
+    ([k]) => !quartzFonts || !FONT_BRIDGE_KEYS.has(k),
+  );
+  const decls = entries.map(([k, v]) => `  ${k}: ${v};`).join("\n");
   // :where() keeps specificity at 0 so any theme rule can override it.
   return `:where(body) {\n${decls}\n}\n`;
+}
+
+/**
+ * Quartz's fonts through Obsidian's override variables. After app.css, whose
+ * `body` sets each override to a placeholder font, and after the theme (whose
+ * font choices were removed).
+ */
+export function quartzFontsCss(): string {
+  const decls = Object.entries(QUARTZ_FONT_BRIDGE)
+    .map(([k, v]) => `  ${k}: ${v};`)
+    .join("\n");
+  return `body {\n${decls}\n}\n`;
 }
 
 export interface ComposeInput {
@@ -148,6 +169,8 @@ export interface ComposeInput {
   quarantine?: string;
   settings?: string;
   reset?: boolean;
+  /** Use the site's Quartz fonts instead of the theme's (`themeFonts: false`). */
+  quartzFonts?: boolean;
 }
 
 /**
@@ -160,6 +183,7 @@ export function composeStylesheet({
   quarantine = "",
   settings = "",
   reset = true,
+  quartzFonts = false,
 }: ComposeInput) {
   const main = [
     "@layer quartz-base, obsidian;",
@@ -167,10 +191,11 @@ export function composeStylesheet({
     reset && CONTENT_RESET,
     CALLOUT_ICON_CSS,
     resetCss(),
-    bridgeCss(),
+    bridgeCss(quartzFonts),
     app,
     theme,
     settings,
+    quartzFonts && quartzFontsCss(),
     "}",
   ]
     .filter(Boolean)
