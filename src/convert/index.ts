@@ -4,7 +4,13 @@
 import { OBSIDIAN_APP } from "../generated/obsidian-app";
 import { composeStylesheet } from "./compose";
 import { convertObsidianCss, type ConvertStats } from "./convert";
-import { pruneFonts, stripThemeFonts, type PruneReport } from "./fonts";
+import {
+  extractFontData,
+  pruneFonts,
+  stripThemeFonts,
+  type FontFile,
+  type PruneReport,
+} from "./fonts";
 import { resolveIcon } from "./icons";
 import {
   parseStyleSettings,
@@ -19,7 +25,8 @@ export {
   resolveStyleSettings,
   resolveIcon,
 };
-export type { ConvertStats, PruneReport, StyleSettingsExport };
+export { extractFontData };
+export type { ConvertStats, FontFile, PruneReport, StyleSettingsExport };
 
 export interface ConvertThemeInput {
   /** The theme's theme.css ("" for Obsidian's default theme). */

@@ -1,7 +1,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import { convertTheme } from "../convert";
-import { pruneFonts } from "../convert/fonts";
+import { extractFontData, pruneFonts } from "../convert/fonts";
 
 const face = (family: string, src: string) =>
   `@font-face { font-family: ${family}; src: ${src}; }`;
@@ -78,6 +78,44 @@ body.demo-serif { --font-text-theme: DemoSerif; }
       styleSettings: { "demo@@demo-serif": true },
     });
     assert.deepEqual(faces(on.main), ["DemoSerif", "DemoSans"]);
+  });
+
+  test("data URIs become content-addressed files", () => {
+    const b64 = Buffer.from("font-bytes").toString("base64");
+    const css = [
+      face("A", `url("data:font/woff2;base64,${b64}") format("woff2")`),
+      face(
+        "B",
+        `url(data:application/octet-stream;base64,${b64}) format("woff2"), local(B)`,
+      ),
+      face(
+        "C",
+        `url(data:application/x-font-ttf;charset=utf-8;base64,${Buffer.from("ttf").toString("base64")})`,
+      ),
+      face("D", "url(data:image/png;base64,AAAA)"),
+      "div { background: url(data:font/woff2;base64,AAAA) }",
+    ].join("\n");
+    const out = extractFontData(css, "fonts", (d) =>
+      Buffer.from(d).toString("hex"),
+    );
+    const hex = Buffer.from("font-bytes").toString("hex");
+    assert.deepEqual(
+      out.files.map((f) => f.name),
+      [`${hex}.woff2`, `${Buffer.from("ttf").toString("hex")}.ttf`],
+    );
+    assert.match(
+      out.css,
+      new RegExp(`src: url\\("fonts/${hex}.woff2"\\) format\\("woff2"\\);`),
+    );
+    assert.match(
+      out.css,
+      new RegExp(
+        `src: url\\("fonts/${hex}.woff2"\\) format\\("woff2"\\), local\\(B\\);`,
+      ),
+    );
+    // Not a font type, and not in @font-face: left alone.
+    assert.match(out.css, /url\(data:image\/png;base64,AAAA\)/);
+    assert.match(out.css, /background: url\(data:font\/woff2;base64,AAAA\)/);
   });
 
   test("themeFonts: false uses the site's Quartz fonts", () => {

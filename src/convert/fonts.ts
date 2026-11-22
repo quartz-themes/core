@@ -202,3 +202,70 @@ export function pruneFonts(sheets: string[]): {
     });
   return { sheets: roots.map((r) => r.toString()), report };
 }
+
+/** Font MIME types (and `format()` hints) → file extensions. */
+const FONT_EXT: [RegExp, string][] = [
+  [/woff2/i, "woff2"],
+  [/woff/i, "woff"],
+  [/(truetype|ttf|sfnt)/i, "ttf"],
+  [/(opentype|otf)/i, "otf"],
+  [/(embedded-opentype|eot|ms-fontobject)/i, "eot"],
+  [/svg/i, "svg"],
+];
+const DATA_URL =
+  /url\(\s*(["']?)(data:([^;,"')]*)((?:;[^,"')]*)*),([^"')]*))\1\s*\)/gi;
+
+export interface FontFile {
+  /** Content-addressed file name, e.g. `3f2a…c1.woff2`. */
+  name: string;
+  data: Uint8Array;
+}
+
+/**
+ * Move `@font-face` data URIs into files, so browsers download only the faces
+ * a page renders, once per site rather than inside the render-blocking
+ * stylesheet. `url(...)` becomes `url("<base>/<hash>.<ext>")`.
+ *
+ * @param hash content hash for file names (node:crypto in the transformer)
+ */
+export function extractFontData(
+  css: string,
+  base: string,
+  hash: (data: Uint8Array) => string,
+): { css: string; files: FontFile[] } {
+  const files = new Map<string, FontFile>();
+  if (!/@font-face/i.test(css) || !/data:/i.test(css))
+    return { css, files: [] };
+  const root = parse(css);
+  root.walkAtRules(/^font-face$/i, (at) => {
+    at.walkDecls(/^src$/i, (d) => {
+      d.value = splitSources(d.value)
+        .map((src) =>
+          src.replace(
+            DATA_URL,
+            (whole, _q, _url, mime: string, params: string, body: string) => {
+              const ext =
+                FONT_EXT.find(([re]) => re.test(mime))?.[1] ??
+                FONT_EXT.find(([re]) =>
+                  re.test(src.slice(src.indexOf(whole) + whole.length)),
+                )?.[1];
+              if (!ext) return whole;
+              let data: Uint8Array;
+              try {
+                data = /;base64/i.test(params)
+                  ? Buffer.from(body.replace(/\s+/g, ""), "base64")
+                  : Buffer.from(decodeURIComponent(body));
+              } catch {
+                return whole; // malformed: leave it to the browser
+              }
+              const name = `${hash(data)}.${ext}`;
+              if (!files.has(name)) files.set(name, { name, data });
+              return `url("${base}/${name}")`;
+            },
+          ),
+        )
+        .join(", ");
+    });
+  });
+  return { css: root.toString(), files: [...files.values()] };
+}

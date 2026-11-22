@@ -96,4 +96,33 @@ describe("QuartzTheme", () => {
     ).__quartzFonts;
     assert.equal(fonts?.fonts["--font-text-theme"], '"Inter"');
   });
+
+  test("ships embedded fonts as files, not inside the stylesheet", async () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "qt-cache-"));
+    const woff2 = Buffer.from("wOF2 not really a font").toString("base64");
+    const plugin = await QuartzTheme({
+      theme: localTheme(
+        `@font-face { font-family: Embedded; src: url(data:font/woff2;base64,${woff2}) format("woff2"); }
+body { --font-text-theme: Embedded; }`,
+      ),
+      mode: "both",
+      cacheDir,
+    });
+    const res = plugin.externalResources!({} as never) as {
+      css: { content: string }[];
+      assets?: { from: string; to: string }[];
+    };
+    const main = res.css[0]!.content;
+    assert.doesNotMatch(main, /data:font/);
+    const m = main.match(
+      /url\("plugins\/(quartz-themes\/fonts\/[0-9a-f]{20}\.woff2)"\) format\("woff2"\)/,
+    );
+    assert.ok(m, "the source points at the shipped file");
+    assert.equal(res.assets?.length, 1);
+    assert.equal(res.assets![0]!.to, m![1]);
+    assert.equal(
+      fs.readFileSync(res.assets![0]!.from, "utf8"),
+      "wOF2 not really a font",
+    );
+  });
 });

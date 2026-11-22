@@ -5,13 +5,16 @@
  * downloads it if needed, and converts it with the static converter before
  * the build starts. CSS is then injected through externalResources().
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type {
   CSSResource,
   JSResource,
+  StaticAsset,
   QuartzTransformerPluginInstance,
 } from "@quartz-community/types";
-import { convertTheme } from "./convert";
+import { convertTheme, extractFontData } from "./convert";
 import { resolveSnippet, resolveTheme } from "./sources";
 import type { StyleSettingsExport, ThemeOptions } from "./types";
 
@@ -53,6 +56,9 @@ export function loadStyleSettings(
     return JSON.parse(fs.readFileSync(input, "utf-8")) as StyleSettingsExport;
   return input;
 }
+
+/** Below static/plugins/ (Quartz 5.1+ copies plugin assets there). */
+const FONT_ASSET_DIR = "quartz-themes/fonts";
 
 const log = (msg: string) => console.log(`[QuartzTheme] ${msg}`);
 
@@ -135,7 +141,31 @@ export const QuartzTheme: AsyncTransformerPlugin<
     mode = supported[0]!;
   }
 
-  const { main, raw } = result;
+  // Embedded fonts become files next to the stylesheet Quartz extracts the
+  // theme CSS into (static/resource-style-*.css → static/plugins/…).
+  const fontDir = path.join(
+    options.cacheDir ?? path.resolve(".quartz-cache/quartz-themes"),
+    "fonts",
+  );
+  const assets: StaticAsset[] = [];
+  const hash = (data: Uint8Array) =>
+    crypto.createHash("sha256").update(data).digest("hex").slice(0, 20);
+  const extract = (css: string) => {
+    const out = extractFontData(css, `plugins/${FONT_ASSET_DIR}`, hash);
+    if (out.files.length) fs.mkdirSync(fontDir, { recursive: true });
+    for (const f of out.files) {
+      const file = path.join(fontDir, f.name);
+      if (!fs.existsSync(file)) fs.writeFileSync(file, f.data);
+      assets.push({ from: file, to: `${FONT_ASSET_DIR}/${f.name}` });
+    }
+    return out.css;
+  };
+  const main = extract(result.main);
+  const raw = result.raw && extract(result.raw);
+  if (assets.length)
+    log(
+      `${assets.length} embedded fonts moved to static/plugins/${FONT_ASSET_DIR}`,
+    );
   if (options.themeFonts !== false) {
     (globalThis as Record<string, unknown>).__quartzFonts = {
       themeName: theme.name,
@@ -164,7 +194,7 @@ export const QuartzTheme: AsyncTransformerPlugin<
       return src;
     },
     externalResources() {
-      return { css, js, additionalHead: [] };
+      return { css, js, additionalHead: [], assets };
     },
   };
 };
