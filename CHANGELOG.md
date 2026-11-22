@@ -1,3 +1,20 @@
+## 3.1.0
+
+### Minor Changes
+
+- `themeFonts: false` uses the site's Quartz fonts (`theme.typography`, or the Fonts plugin)
+  for text, headings and code: the theme's web fonts and font choices are removed and
+  Obsidian's font override variables point at Quartz's.
+- A theme's embedded (base64) fonts ship as separate files in
+  `static/plugins/quartz-themes/fonts/` instead of inside the stylesheet, so browsers download
+  only the fonts a page uses, once per site. Latsidian's stylesheet goes from 44.8 MB to 330 KB.
+
+### Patch Changes
+
+- Fonts a theme bundles but never uses are left out, after Style Settings apply, so a font only
+  a disabled option uses goes too. So are fonts whose relative `url()` points at files that
+  aren't part of the theme (no more 404s on Subtlegold, Sandstorm and others).
+
 ## 3.0.1
 
 ### Patch Changes
