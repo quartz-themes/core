@@ -6,7 +6,6 @@
  * the build starts. CSS is then injected through externalResources().
  */
 import fs from "node:fs";
-import postcss from "postcss";
 import type {
   CSSResource,
   JSResource,
@@ -55,19 +54,6 @@ export function loadStyleSettings(
   return input;
 }
 
-/** Remove the theme's web fonts (themeFonts: false). */
-function stripFonts(css: string): string {
-  const root = postcss.parse(css);
-  root.walkAtRules(/^(font-face|import)$/i, (at) => {
-    if (
-      at.name.toLowerCase() === "font-face" ||
-      /fonts?\b|\.woff|\.ttf|\.otf/i.test(at.params)
-    )
-      at.remove();
-  });
-  return root.toString();
-}
-
 const log = (msg: string) => console.log(`[QuartzTheme] ${msg}`);
 
 /**
@@ -108,7 +94,12 @@ export const QuartzTheme: AsyncTransformerPlugin<
   };
 
   const t0 = performance.now();
-  const result = convertTheme({ themeCss: theme.css, styleSettings, snippets });
+  const result = convertTheme({
+    themeCss: theme.css,
+    styleSettings,
+    snippets,
+    themeFonts: options.themeFonts !== false,
+  });
   const s = result.report.theme;
   log(
     `${theme.name}${theme.version ? ` ${theme.version}` : ""}: ${s.rules} rules converted in ${Math.round(performance.now() - t0)} ms` +
@@ -123,6 +114,18 @@ export const QuartzTheme: AsyncTransformerPlugin<
     );
   }
 
+  const f = result.report.fonts;
+  if (f.bytes)
+    log(
+      `dropped ${[
+        f.unused.length && `${f.unused.length} unused font families`,
+        f.unresolvable.length &&
+          `${f.unresolvable.length} fonts whose files aren't part of the theme`,
+      ]
+        .filter(Boolean)
+        .join(" and ")} (${Math.round(f.bytes / 1024)} KB)`,
+    );
+
   // Modes: honour what the theme supports.
   let mode = options.mode;
   const supported = theme.modes;
@@ -132,12 +135,8 @@ export const QuartzTheme: AsyncTransformerPlugin<
     mode = supported[0]!;
   }
 
-  let main = result.main;
-  let raw = result.raw;
-  if (options.themeFonts === false) {
-    main = stripFonts(main);
-    raw = raw && stripFonts(raw);
-  } else {
+  const { main, raw } = result;
+  if (options.themeFonts !== false) {
     (globalThis as Record<string, unknown>).__quartzFonts = {
       themeName: theme.name,
       fonts: extractFontVars(result.themeCss),

@@ -4,6 +4,7 @@
 import { OBSIDIAN_APP } from "../generated/obsidian-app";
 import { composeStylesheet } from "./compose";
 import { convertObsidianCss, type ConvertStats } from "./convert";
+import { pruneFonts, stripThemeFonts, type PruneReport } from "./fonts";
 import { resolveIcon } from "./icons";
 import {
   parseStyleSettings,
@@ -18,7 +19,7 @@ export {
   resolveStyleSettings,
   resolveIcon,
 };
-export type { ConvertStats, StyleSettingsExport };
+export type { ConvertStats, PruneReport, StyleSettingsExport };
 
 export interface ConvertThemeInput {
   /** The theme's theme.css ("" for Obsidian's default theme). */
@@ -27,6 +28,11 @@ export interface ConvertThemeInput {
   styleSettings?: StyleSettingsExport;
   /** Extra Obsidian CSS snippets, applied after the theme. */
   snippets?: string[];
+  /**
+   * Include the theme's web fonts and font choices. `false`: the site's Quartz
+   * fonts (from quartz.config) are used instead. @default true
+   */
+  themeFonts?: boolean;
   /** Override the bundled, pre-converted Obsidian app.css (for tests/tools). */
   app?: { css: string; quarantine: string };
 }
@@ -47,6 +53,8 @@ export interface ConvertThemeResult {
       applied: string[];
       unknown: string[];
     };
+    /** Web fonts pruned from the theme (unused families, unresolvable sources). */
+    fonts: PruneReport;
   };
 }
 
@@ -54,6 +62,7 @@ export function convertTheme({
   themeCss,
   styleSettings = {},
   snippets = [],
+  themeFonts = true,
   app = OBSIDIAN_APP,
 }: ConvertThemeInput): ConvertThemeResult {
   const { sections, errors } = parseStyleSettings(
@@ -74,22 +83,33 @@ export function convertTheme({
     filename: "style-settings.css",
   });
 
-  const { main, raw } = composeStylesheet({
+  // Without theme fonts, the theme's font choices go before composing (the
+  // bundled app.css keeps its own, which the Quartz font bridge feeds).
+  const own = (css: string) => (themeFonts ? css : stripThemeFonts(css));
+  const themeOnly = own([theme.css, ...snips.map((s) => s.css)].join("\n"));
+  const settingsCss = own(settings.css);
+  const composed = composeStylesheet({
     app: app.css,
-    theme: [theme.css, ...snips.map((s) => s.css)].join("\n"),
+    theme: themeOnly,
     quarantine: [
       app.quarantine,
-      theme.quarantine,
-      ...snips.map((s) => s.quarantine),
+      own(
+        [theme.quarantine, ...snips.map((s) => s.quarantine)]
+          .filter(Boolean)
+          .join("\n"),
+      ),
     ]
       .filter(Boolean)
       .join("\n"),
-    settings: settings.css,
+    settings: settingsCss,
+    quartzFonts: !themeFonts,
   });
+  const pruned = pruneFonts([composed.main, composed.raw]);
+  const [main, raw] = pruned.sheets as [string, string];
   return {
     main,
     raw,
-    themeCss: [theme.css, ...snips.map((s) => s.css), settings.css].join("\n"),
+    themeCss: [themeOnly, settingsCss].join("\n"),
     report: {
       theme: theme.stats,
       styleSettings: {
@@ -99,6 +119,7 @@ export function convertTheme({
         applied: resolved.applied,
         unknown: resolved.unknown,
       },
+      fonts: pruned.report,
     },
   };
 }

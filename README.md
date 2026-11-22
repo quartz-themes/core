@@ -45,16 +45,16 @@ plugins:
 
 ## Configuration
 
-| Option          | Type                          | Default                       | Description                                                                                                                                  |
-| --------------- | ----------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `theme`         | `string`                      | `"Tokyo Night"`               | The theme: a community name, `owner/repo`, URL, local path, or pre-3.0 id (see above).                                                       |
-| `mode`          | `"both" \| "light" \| "dark"` | `"both"`                      | Which mode(s) to include. With a single mode (or a theme that only has one), the dark mode toggle is hidden and the site stays in that mode. |
-| `styleSettings` | `object \| string`            | —                             | A Style Settings export, or the path to a JSON file holding one. Keys look like `minimal-style@@h1-color@@dark`.                             |
-| `snippets`      | `string[]`                    | —                             | Obsidian CSS snippets (paths or URLs), applied after the theme.                                                                              |
-| `version`       | `string`                      | latest                        | Pin a community theme to a release version.                                                                                                  |
-| `themeFonts`    | `boolean`                     | `true`                        | Include the theme's own web fonts (`@font-face`, `@import`).                                                                                 |
-| `cacheDir`      | `string`                      | `.quartz-cache/quartz-themes` | Where downloaded themes are cached. Builds work offline from the cache.                                                                      |
-| `cacheHours`    | `number`                      | `24`                          | How long before checking for a new theme version.                                                                                            |
+| Option          | Type                          | Default                       | Description                                                                                                                                                         |
+| --------------- | ----------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `theme`         | `string`                      | `"Tokyo Night"`               | The theme: a community name, `owner/repo`, URL, local path, or pre-3.0 id (see above).                                                                              |
+| `mode`          | `"both" \| "light" \| "dark"` | `"both"`                      | Which mode(s) to include. With a single mode (or a theme that only has one), the dark mode toggle is hidden and the site stays in that mode.                        |
+| `styleSettings` | `object \| string`            | —                             | A Style Settings export, or the path to a JSON file holding one. Keys look like `minimal-style@@h1-color@@dark`.                                                    |
+| `snippets`      | `string[]`                    | —                             | Obsidian CSS snippets (paths or URLs), applied after the theme.                                                                                                     |
+| `version`       | `string`                      | latest                        | Pin a community theme to a release version.                                                                                                                         |
+| `themeFonts`    | `boolean`                     | `true`                        | Use the theme's fonts. `false` uses your Quartz fonts (`theme.typography` or the Fonts plugin) instead. Fonts the theme bundles but never uses are always left out. |
+| `cacheDir`      | `string`                      | `.quartz-cache/quartz-themes` | Where downloaded themes are cached. Builds work offline from the cache.                                                                                             |
+| `cacheHours`    | `number`                      | `24`                          | How long before checking for a new theme version.                                                                                                                   |
 
 ## How it works
 

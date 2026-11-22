@@ -32,7 +32,11 @@ export interface ThemeOptions {
   snippets?: string[];
   /** Pin a community theme to a release version (e.g. `"7.7.19"`). Default: latest. */
   version?: string;
-  /** Include the theme's own web fonts (@font-face / @import). @default true */
+  /**
+   * Use the theme's fonts. `false`: the theme's web fonts and font choices are
+   * removed and the site's Quartz fonts (quartz.config `theme.typography`, or
+   * the Fonts plugin) are used for text, headings and code. @default true
+   */
   themeFonts?: boolean;
   /** Cache directory for downloaded themes. @default ".quartz-cache/quartz-themes" */
   cacheDir?: string;
