@@ -16,6 +16,13 @@
 - Rules for the pre-1.0 `.nav-folder-collapse-indicator`, which Obsidian no longer renders,
   are dropped: Catppuccin and others hid the explorer's chevron with them, leaving no way to
   open a folder.
+- Explorer rows follow Obsidian's indentation: a row's content starts 24px past its indent
+  whatever the theme sets, as Obsidian's inline styles enforce, so the chevron stays inside
+  the row (Carbon, Sanctum and others clipped it off the sidebar, and clicks on it opened the
+  folder page). A collapsed folder's children are hidden outright, as Obsidian removes them
+  (Apple Notes, Hidontknow and Nox Aeterna showed them through their padding).
+- A theme's size container (`container-type: size`) no longer collapses Quartz's explorer to one
+  row (Oboro), also when the rule is shared with other elements through `:is()`.
 - The phone explorer opens again with themes that set `will-change`, `transform` or `filter`
   on the file list (Book and Quill, Bamboo China): those properties made the list the
   containing block of Quartz's fixed overlay.

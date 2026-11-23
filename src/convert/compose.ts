@@ -163,6 +163,32 @@ export function quartzFontsCss(): string {
   return `body {\n${decls}\n}\n`;
 }
 
+/**
+ * Obsidian indents its file explorer with inline styles on every row
+ * (`margin-inline-start: -17px·depth; padding-inline-start: 24px + 17px·depth`,
+ * both `!important`), which cancel its 17px child indentation: whatever the
+ * theme says, a row's content starts 24px past its indent, and the chevron
+ * (`.tree-item-icon`, absolutely positioned 20px back) sits inside the row.
+ * Quartz indents with its nested lists, so the same holds with 24px at every
+ * depth. In the lower layer, `!important` beats a theme's `!important`, as an
+ * inline style does (Carbon, Sanctum and others clipped the chevron off the
+ * sidebar's edge).
+ *
+ * Obsidian also takes a collapsed folder's children out of the page; Quartz
+ * collapses them to a zero-height grid row, which a theme's padding, borders
+ * or heights on `.nav-folder-children` would show through (Apple Notes,
+ * Nox Aeterna).
+ */
+export const EXPLORER_CSS = `@layer quartz-base {
+:where(.explorer) :where(.tree-item-self) {
+  margin-inline-start: 0 !important;
+  padding-inline-start: 24px !important;
+}
+:where(.explorer) :where(.folder-outer:not(.open)) {
+  display: none !important;
+}
+}`;
+
 export interface ComposeInput {
   app: string;
   theme: string;
@@ -197,6 +223,7 @@ export function composeStylesheet({
     settings,
     quartzFonts && quartzFontsCss(),
     "}",
+    EXPLORER_CSS,
   ]
     .filter(Boolean)
     .join("\n");

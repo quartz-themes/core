@@ -281,6 +281,7 @@ export function convertObsidianCss(
     const blockWrapperSels: string[] = [];
     try {
       out = selectorParser((selectors) => {
+        if (splitMixedIs(selectors, { bodyState })) changed = true;
         selectors.each((sel) => {
           stats.selectors.in++;
           const res = processSelector(sel, { bodyState }, true);
@@ -314,7 +315,7 @@ export function convertObsidianCss(
       stats.keptVerbatim++;
     }
     const guards: [string[], (d: Declaration) => boolean][] = [
-      [structuralSels, (d) => LAYOUT_PROPS.test(d.prop)],
+      [structuralSels, (d) => LAYOUT_PROPS.test(d.prop) || isSizeContainer(d)],
       [contentRootSels, isContentRootLayout],
       [mappedRootSels, isMappedRootLayout],
       [blockWrapperSels, (d) => OVERFLOW_PROPS.test(d.prop)],
@@ -386,6 +387,15 @@ export function convertObsidianCss(
  */
 const LAYOUT_PROPS =
   /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|transform-style|translate|scale|rotate|zoom|perspective|filter|backdrop-filter|-webkit-backdrop-filter|will-change|visibility|opacity|user-select|-webkit-user-select|pointer-events|z-index)$/;
+
+/**
+ * A size container ignores its content's height (`container-type: size`, or the
+ * `container: name / size` shorthand). Obsidian's panes have fixed sizes, so
+ * themes use it freely (Oboro's scroll effects on the file list); Quartz sizes
+ * its sidebar elements by their content, which would collapse to nothing.
+ */
+const isSizeContainer = (d: Declaration) =>
+  /^container(-type)?$/i.test(d.prop) && /(^|[\s/])size\b/i.test(d.value);
 
 /**
  * Quartz's content root is laid out by Quartz: the page provides the gutters
@@ -623,6 +633,39 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
     }
   }
   return changed;
+}
+
+/**
+ * `:is(.nav-files-container, .search-result-container) { container-type: size }`:
+ * when only some alternatives of a whole-selector `:is()` are Quartz's own
+ * layout elements, the layout guard can't strip their layout without stripping
+ * everyone's. Split it into `:is(A), :is(B)` (each keeping its own
+ * specificity), so each alternative is guarded on its own.
+ */
+function splitMixedIs(selectors: selectorParser.Root, ctx: Ctx): boolean {
+  let split = false;
+  for (const sel of [...selectors.nodes]) {
+    const only = sel.nodes.length === 1 ? sel.nodes[0] : undefined;
+    if (
+      only?.type !== "pseudo" ||
+      only.value !== ":is" ||
+      only.nodes.length < 2
+    )
+      continue;
+    const structural = only.nodes.map(
+      (inner) =>
+        !!processSelector(inner.clone() as SSelector, ctx, true).structural,
+    );
+    if (structural.every(Boolean) || !structural.some(Boolean)) continue;
+    for (const inner of only.nodes)
+      selectors.insertBefore(
+        sel,
+        selectorParser().astSync(`:is(${inner.toString().trim()})`).first,
+      );
+    sel.remove();
+    split = true;
+  }
+  return split;
 }
 
 /**

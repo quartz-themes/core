@@ -390,6 +390,25 @@ describe("selector rewriting", () => {
       conv(".nav-files-container > div.foo > .nav-folder { color: red }"),
       ".nav-files-container > div.foo > .nav-folder { color: red }",
     );
+    // Oboro: a size container's height ignores its content (the explorer
+    // list would collapse); inline-size is harmless.
+    assert.equal(
+      conv(
+        ".nav-files-container { container-type: size scroll-state; container-name: x; color: red }",
+      ),
+      ".nav-files-container { container-name: x; color: red }",
+    );
+    // Behind a shared :is(), only Quartz's element loses it.
+    assert.equal(
+      conv(
+        ":is(.nav-files-container, .search-result-container) { container-type: size; color: red }",
+      ),
+      ":is(.search-result-container) { container-type: size; color: red } :is(.nav-files-container) { color: red }",
+    );
+    assert.equal(
+      conv(".nav-files-container { container: x / inline-size }"),
+      ".nav-files-container { container: x / inline-size }",
+    );
     // Book and Quill: `will-change: transform` would trap the phone
     // explorer's fixed overlay inside the explorer.
     assert.equal(
@@ -465,5 +484,21 @@ describe("compose", () => {
     });
     assert.ok(main.startsWith(url), main.slice(0, 120));
     assert.match(main, /@layer obsidian \{[\s\S]*body \{ color: red \}/);
+  });
+
+  test("explorer rows keep Obsidian's inline indentation, collapsed children are gone", () => {
+    const { main } = composeStylesheet({
+      app: "",
+      theme: ".nav-folder-title { padding-left: 4px !important }",
+    });
+    // In the lower layer, so its !important wins, like Obsidian's inline style.
+    assert.match(
+      main,
+      /\}\n@layer quartz-base \{\n:where\(\.explorer\) :where\(\.tree-item-self\) \{\n {2}margin-inline-start: 0 !important;\n {2}padding-inline-start: 24px !important;/,
+    );
+    assert.match(
+      main,
+      /:where\(\.folder-outer:not\(\.open\)\) \{\n {2}display: none !important;/,
+    );
   });
 });
