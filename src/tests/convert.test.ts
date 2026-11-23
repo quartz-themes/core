@@ -305,6 +305,76 @@ describe("selector rewriting", () => {
     );
     assert.equal(conv(".mod-left-split { opacity: 0 }"), "");
   });
+
+  test("bases keep Quartz's table layout, and the theme's colours", () => {
+    // Obsidian's .bases-table is an absolutely positioned, virtualised div.
+    assert.equal(
+      conv(
+        ".bases-table { position: absolute; display: flex; width: 0; color: red }",
+      ),
+      ".bases-table { color: red }",
+    );
+    assert.equal(
+      conv(
+        ".bases-view .bases-tr { height: 30px; border-bottom: 1px solid red }",
+      ),
+      ".bases-view .bases-tr { border-bottom: 1px solid red }",
+    );
+  });
+
+  test("the vault-root folder is Quartz's explorer list, not every folder", () => {
+    // Its title row is the vault name: no Quartz counterpart.
+    assert.equal(
+      conv(".nav-folder.mod-root > .nav-folder-title { display: none }"),
+      "",
+    );
+    // Catppuccin hides the root's folder icon, not every folder's.
+    assert.equal(
+      conv(
+        ".nav-folder-collapse-indicator, .nav-folder.mod-root > .nav-folder-title .nav-folder-title-content::before, .nav-folder-title .nav-folder-title-content::before { display: none }",
+      ),
+      ".nav-folder-title .nav-folder-title-content::before { display: none }",
+    );
+    // Obsidian 1.x no longer renders `.nav-folder-collapse-indicator`.
+    assert.equal(
+      conv(".nav-folder-collapse-indicator svg { display: none }"),
+      "",
+    );
+    assert.equal(
+      conv(
+        ".nav-folder.mod-root > .nav-folder-children > .nav-folder { color: red }",
+      ),
+      ":where(.explorer-ul):not(.qt-0):not(.qt-0):not(.qt-0)>.nav-folder { color: red }",
+    );
+    assert.equal(
+      conv(".nav-folder.mod-root .nav-folder { color: red }"),
+      ":where(.explorer-ul):not(.qt-0):not(.qt-0) .nav-folder { color: red }",
+    );
+    // Quartz lays out its explorer list.
+    assert.equal(
+      conv(".nav-folder.mod-root { display: none; padding: 4px }"),
+      ":where(.explorer-ul):not(.qt-0):not(.qt-0) { padding: 4px }",
+    );
+    // Book and Quill: `will-change: transform` would trap the phone
+    // explorer's fixed overlay inside the explorer.
+    assert.equal(
+      conv(".nav-files-container { will-change: transform; padding-top: 4px }"),
+      ".nav-files-container { padding-top: 4px }",
+    );
+    // Firefly leaves out `.nav-folder`.
+    assert.equal(conv(".mod-root > .nav-folder-title { display: none }"), "");
+    assert.equal(
+      conv(
+        ".mod-root > .nav-folder-children > .nav-file { border-left: none }",
+      ),
+      ":where(.explorer-ul):not(.qt-0):not(.qt-0)>.nav-file { border-left: none }",
+    );
+    // Every Quartz folder is "not the root".
+    assert.equal(
+      conv(".nav-folder:not(.mod-root) > .nav-folder-title { color: red }"),
+      ".nav-folder:not(.qt-0)>.nav-folder-title { color: red }",
+    );
+  });
 });
 
 describe("robustness", () => {

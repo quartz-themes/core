@@ -56,6 +56,38 @@ export const APP_ONLY_PREFIXES = [
   "release-notes",
   "is-grabbing",
   "is-being-dragged",
+  // Pre-1.0 explorer markup, gone from Obsidian (now `.tree-item-icon.collapse-icon`):
+  // themes' rules for it are dead there. Quartz's explorer carried the class, so
+  // Catppuccin's `display: none` hid the only way to open a folder.
+  "nav-folder-collapse-indicator",
+];
+
+/**
+ * Classes Quartz renders with its own layout (a plugin's markup shares
+ * Obsidian's class names but not its DOM): rules for them keep colours,
+ * borders and type, but layout properties are dropped, as for Quartz's
+ * structural elements. Obsidian's `.bases-table` is an absolutely positioned,
+ * virtualised `<div>`; Quartz's is the `<table>` itself. Quartz's explorer
+ * element and its list carry `.nav-files-container`.
+ */
+export const QUARTZ_LAYOUT_PREFIXES = ["bases-", "nav-files-container"];
+
+/**
+ * Obsidian's file explorer nests everything in a vault-root folder
+ * (`.nav-folder.mod-root`), whose title row is the vault name. Quartz's
+ * explorer has no root folder: its top-level list (EXPLORER_ROOT) holds the
+ * top-level folders and files. So the root folder maps onto that list, rules
+ * for its children container (`.mod-root > .nav-folder-children`) onto the
+ * list itself, and rules for its title row are dropped. Eliding `.mod-root`
+ * like a workspace wrapper would make `.nav-folder.mod-root > .nav-folder-title
+ * { display: none }` hide every folder.
+ */
+export const EXPLORER_ROOT = ".explorer-ul";
+export const TREE_ITEM_CLASSES = ["nav-folder", "tree-item"];
+export const TREE_TITLE_CLASSES = ["nav-folder-title", "tree-item-self"];
+export const TREE_CHILDREN_CLASSES = [
+  "nav-folder-children",
+  "tree-item-children",
 ];
 
 /**

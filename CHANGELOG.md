@@ -1,3 +1,21 @@
+## 3.1.2
+
+### Patch Changes
+
+- Bases render again: Obsidian lays out its tables as absolutely positioned, virtualised
+  `<div>`s, and those layout rules no longer apply to Quartz's `<table>`. Themes still colour
+  and border them.
+- Explorer folders no longer disappear or lose their icons: rules for Obsidian's vault-root
+  folder (`.nav-folder.mod-root`, whose title row is the vault name) applied to every folder;
+  they now apply to the explorer's top-level list, and rules for the vault name are dropped
+  (Apex, Firefly, Coding Agent, Catppuccin's folder icons and ~140 other themes).
+- Rules for the pre-1.0 `.nav-folder-collapse-indicator`, which Obsidian no longer renders,
+  are dropped: Catppuccin and others hid the explorer's chevron with them, leaving no way to
+  open a folder.
+- The phone explorer opens again with themes that set `will-change`, `transform` or `filter`
+  on the file list (Book and Quill, Bamboo China): those properties made the list the
+  containing block of Quartz's fixed overlay.
+
 ## 3.1.1
 
 ### Patch Changes

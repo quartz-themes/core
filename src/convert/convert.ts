@@ -47,6 +47,11 @@ import {
   CONTENT_ROOT_CLASSES,
   BARE_TAGS,
   LANGUAGE_CLASS_PREFIX,
+  QUARTZ_LAYOUT_PREFIXES,
+  EXPLORER_ROOT,
+  TREE_ITEM_CLASSES,
+  TREE_TITLE_CLASSES,
+  TREE_CHILDREN_CLASSES,
   isAppOnly,
 } from "./profile";
 
@@ -375,10 +380,13 @@ export function convertObsidianCss(
  * Properties that control page layout. Quartz owns the layout of its
  * structural elements (html, body, sidebars, header, footer); a theme only
  * gets to style them. (Opacity too: themes fade Obsidian's side panels until
- * hovered, but Quartz's left sidebar is the header on phones.)
+ * hovered, but Quartz's left sidebar is the header on phones.) And anything
+ * that makes an element the containing block of its fixed-position descendants
+ * (`transform`, `filter`, `will-change: transform`, …): Quartz's phone explorer
+ * is a fixed overlay inside the explorer.
  */
 const LAYOUT_PROPS =
-  /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|translate|scale|rotate|zoom|visibility|opacity|user-select|-webkit-user-select|pointer-events|z-index)$/;
+  /^(position|display|float|clear|contain|content-visibility|overflow(-[xy])?|overscroll-behavior.*|(min-|max-)?(width|height)|(min-|max-)?(inline|block)-size|inset.*|top|right|bottom|left|flex.*|grid.*|order|align-self|justify-self|place-self|transform|transform-style|translate|scale|rotate|zoom|perspective|filter|backdrop-filter|-webkit-backdrop-filter|will-change|visibility|opacity|user-select|-webkit-user-select|pointer-events|z-index)$/;
 
 /**
  * Quartz's content root is laid out by Quartz: the page provides the gutters
@@ -572,6 +580,85 @@ const isChild = (c?: selectorParser.Combinator) => c?.value.trim() === ">";
 const isDescendantOrChild = (c?: selectorParser.Combinator) =>
   c !== undefined && (c.value.trim() === "" || c.value.trim() === ">");
 
+const classesOf = (c: Compound) =>
+  c.nodes.flatMap((n) => (n.type === "class" ? [n.value] : []));
+/** `.nav-folder.mod-root`, or a bare `.mod-root` whose child is a tree part. */
+const isTreeRoot = (c: Compound, next?: Compound) => {
+  const classes = classesOf(c);
+  if (!classes.includes("mod-root")) return false;
+  if (classes.some((v) => TREE_ITEM_CLASSES.includes(v))) return true;
+  return (
+    classes.length === 1 &&
+    !!next &&
+    isChild(next.before) &&
+    classesOf(next).some(
+      (v) =>
+        TREE_TITLE_CLASSES.includes(v) || TREE_CHILDREN_CLASSES.includes(v),
+    )
+  );
+};
+
+/**
+ * Obsidian's vault-root folder → Quartz's explorer list (see EXPLORER_ROOT):
+ * `.nav-folder.mod-root > .nav-folder-children > .nav-folder` →
+ * `:where(.explorer-ul):not(.qt-0)… > .nav-folder`; a rule for the root's
+ * title row (the vault name) matches nothing in Quartz. Specificity is kept.
+ * Returns whether the selector changed, or "drop".
+ */
+function rewriteTreeRoot(sel: SSelector): boolean | "drop" {
+  let changed = false;
+  for (let i = 0, all = splitCompounds(sel); i < all.length; i++) {
+    const next = all[i + 1];
+    if (!isTreeRoot(all[i]!, next)) continue;
+    if (next && isChild(next.before)) {
+      const nc = classesOf(next);
+      if (nc.some((v) => TREE_TITLE_CLASSES.includes(v))) return "drop";
+      // `> .nav-folder-children` (optionally `div.`, `:hover`, `::before`)
+      // is the list itself.
+      const own = (n: SNode) =>
+        (n.type === "class" && TREE_CHILDREN_CLASSES.includes(n.value)) ||
+        n.type === "tag";
+      if (
+        nc.some((v) => TREE_CHILDREN_CLASSES.includes(v)) &&
+        next.nodes.every((n) => own(n) || n.type === "pseudo")
+      ) {
+        const spec: Spec = [
+          0,
+          next.nodes.filter((n) => n.type === "class").length,
+          next.nodes.filter((n) => n.type === "tag").length,
+        ];
+        const last = all[i]!.nodes[all[i]!.nodes.length - 1]!;
+        next.before!.remove();
+        for (const n of next.nodes) if (own(n)) n.remove();
+        // After the root's own nodes, before the children's pseudos.
+        for (const p of pad(spec).reverse()) last.parent!.insertAfter(last, p);
+      }
+    }
+    const fresh = splitCompounds(sel)[i]!;
+    let spec: Spec = [0, 0, 0];
+    let anchor: SNode | undefined;
+    for (const n of fresh.nodes) {
+      const tree =
+        n.type === "class" &&
+        (n.value === "mod-root" || TREE_ITEM_CLASSES.includes(n.value));
+      if (!tree && n.type !== "tag") continue;
+      spec =
+        n.type === "tag"
+          ? [0, spec[1], spec[2] + 1]
+          : [0, spec[1] + 1, spec[2]];
+      if (anchor) n.remove();
+      else anchor = n;
+    }
+    // `:where()` adds nothing; pad restores the classes' specificity.
+    for (const n of [...nodesOf(`:where(${EXPLORER_ROOT})`), ...pad(spec)])
+      anchor!.parent!.insertBefore(anchor!, n);
+    anchor!.remove();
+    changed = true;
+    all = splitCompounds(sel);
+  }
+  return changed;
+}
+
 /**
  * Rewrite one complex selector in place. `top` is false for selectors nested
  * in :not()/:is()/:has(), where dropping would invert or widen the meaning.
@@ -581,8 +668,10 @@ function processSelector(
   ctx: Ctx,
   top = false,
 ): SelectorResult {
+  const treeRoot = rewriteTreeRoot(sel);
+  if (treeRoot === "drop") return { drop: "staticFalse" };
   const compounds = splitCompounds(sel);
-  let changed = false;
+  let changed = treeRoot;
   let anyConcrete = false;
   let anyElided = false;
   let structural = false;
@@ -843,6 +932,12 @@ function processCompound(
           replace(node, pad(CLASS_SPEC));
           wrapper = true;
           if (CONTENT_WRAPPERS.has(v)) content = true;
+        } else if (
+          QUARTZ_LAYOUT_PREFIXES.some((p) => v.startsWith(p)) ||
+          `.${v}` === EXPLORER_ROOT
+        ) {
+          concrete = named = true;
+          structuralTarget = true;
         } else if (v.startsWith(LANGUAGE_CLASS_PREFIX)) {
           // `.language-js` → `[data-language="js"]` (same specificity).
           const lang = v.slice(LANGUAGE_CLASS_PREFIX.length);
