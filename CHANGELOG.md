@@ -35,7 +35,8 @@
 - Properties rules scoped to the reading view (`.markdown-preview-view .metadata-container`, in
   71 themes and Obsidian's own CSS) apply to Quartz's properties block, which sits above the note
   rather than inside it, and the block starts from browser defaults, like note content, so
-  Quartz's own properties styles don't show through. With note-properties' Obsidian markup,
+  Quartz's own properties styles don't show through; property pills (`.multi-select-pill`) are
+  styled instead of dropped as app UI. With note-properties' Obsidian markup,
   themes style properties as in Obsidian.
 - Tables keep the space above them: Obsidian's "no top margin for the note's first block" rule
   (`.markdown-preview-pusher + div > :first-child`) applied to the first child of every block,

@@ -132,6 +132,15 @@ describe("selector rewriting", () => {
     assert.doesNotMatch(out, /pusher/);
   });
 
+  test("property pills are styled; their editing parts are app-only", () => {
+    assert.equal(
+      conv(".multi-select-pill { border-radius: 9px }"),
+      ".multi-select-pill { border-radius: 9px }",
+    );
+    assert.equal(conv(".multi-select-pill-remove-button { color: red }"), "");
+    assert.equal(conv(".multi-select-input { color: red }"), "");
+  });
+
   test("properties rules scoped to the reading view reach Quartz's properties block", () => {
     // Quartz renders properties above the note, outside .markdown-preview-view.
     assert.equal(

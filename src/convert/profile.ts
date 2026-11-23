@@ -43,7 +43,9 @@ export const APP_ONLY_PREFIXES = [
   "tooltip",
   "inline-title-",
   "metadata-add",
-  "multi-select",
+  // Property pills render (note-properties); their editing parts don't.
+  "multi-select-input",
+  "multi-select-pill-remove",
   "suggestion-container",
   "prompt-instruction",
   "mod-sidedock",
