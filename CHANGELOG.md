@@ -39,6 +39,10 @@
   Quartz's own properties styles don't show through; property pills (`.multi-select-pill`) are
   styled instead of dropped as app UI. With note-properties' Obsidian markup,
   themes style properties as in Obsidian.
+- Rules for Obsidian's block wrappers (`.el-p`, `.el-table`, `.el-pre`, `.el-h1`…, in ~100 themes
+  and Obsidian's own CSS) apply to the blocks Quartz renders: `div.el-p > p` is the paragraph,
+  `.el-table` Quartz's `.table-container`, `.el-pre` the code block. Headings after tables and code
+  blocks get Obsidian's spacing again.
 - Style Settings with an id that isn't a valid CSS variable name (Minimal's
   `cards-background-hover (hover)`) no longer cost every other colour setting: the invalid
   declaration is left out, as browsers do, instead of the whole block being rejected and lost.

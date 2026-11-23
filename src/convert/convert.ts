@@ -645,6 +645,148 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
 }
 
 /**
+ * Obsidian wraps each top-level block in a div named after it (`div.el-p > p`,
+ * `div.el-table > table`); Quartz doesn't. Themes use the wrapper names to
+ * mean "the block": `.el-table + div > h2` is "a heading after a table". Each
+ * maps to the element Quartz renders for that block, the wrapper's own
+ * selector replaced at the same specificity.
+ */
+const BLOCK_WRAPPERS: Record<string, { block: string; natural: string[] }> = {
+  "el-p": { block: "p", natural: ["p"] },
+  "el-ul": { block: "ul", natural: ["ul"] },
+  "el-ol": { block: "ol", natural: ["ol"] },
+  "el-blockquote": { block: "blockquote", natural: ["blockquote"] },
+  "el-hr": { block: "hr", natural: ["hr"] },
+  "el-h1": { block: "h1", natural: ["h1"] },
+  "el-h2": { block: "h2", natural: ["h2"] },
+  "el-h3": { block: "h3", natural: ["h3"] },
+  "el-h4": { block: "h4", natural: ["h4"] },
+  "el-h5": { block: "h5", natural: ["h5"] },
+  "el-h6": { block: "h6", natural: ["h6"] },
+  // Quartz wraps tables in .table-container and highlighted code in a <figure>.
+  "el-table": { block: ".table-container", natural: ["table"] },
+  "el-pre": {
+    // No `figure` type selector: theme figure rules are kept off this figure.
+    block:
+      "[data-rehype-pretty-code-figure], :not([data-rehype-pretty-code-figure]) > pre",
+    natural: ["pre"],
+  },
+  // Callouts and raw HTML blocks.
+  "el-div": { block: "div", natural: ["div"] },
+};
+
+/** The wrapper names in a compound: `div.el-p`, or `div:is(.el-p, .el-table)`. */
+function wrapperNames(c: Compound): { names: string[]; nodes: SNode[] } | null {
+  const names: string[] = [];
+  const nodes: SNode[] = [];
+  for (const n of c.nodes) {
+    if (n.type === "class" && BLOCK_WRAPPERS[n.value]) {
+      names.push(n.value);
+      nodes.push(n);
+    } else if (n.type === "tag" && n.value.toLowerCase() === "div")
+      nodes.push(n);
+    else if (
+      n.type === "pseudo" &&
+      (n.value === ":is" || n.value === ":where" || n.value === ":matches") &&
+      (n as selectorParser.Pseudo).nodes.length &&
+      (n as selectorParser.Pseudo).nodes.every(
+        (alt) =>
+          alt.nodes.length === 1 &&
+          alt.nodes[0]!.type === "class" &&
+          !!BLOCK_WRAPPERS[alt.nodes[0]!.value],
+      )
+    ) {
+      for (const alt of (n as selectorParser.Pseudo).nodes)
+        names.push(String(alt.nodes[0]!.value));
+      nodes.push(n);
+    }
+  }
+  return names.length ? { names, nodes } : null;
+}
+
+const bareDiv = (c: Compound) =>
+  c.nodes.length > 0 &&
+  c.nodes.every(
+    (n) =>
+      (n.type === "tag" && n.value.toLowerCase() === "div") ||
+      (n.type === "pseudo" && !isPseudoElement(n) && n.value !== ":is"),
+  ) &&
+  c.nodes.some((n) => n.type === "tag");
+
+function rewriteBlockWrappers(sel: SSelector): boolean {
+  let changed = false;
+  // Right to left, so removing compound i+1 keeps earlier indices valid.
+  for (let i = splitCompounds(sel).length - 1; i >= 0; i--) {
+    const all = splitCompounds(sel);
+    const c = all[i]!;
+    const found = wrapperNames(c);
+    if (!found) continue;
+    const next = all[i + 1];
+    const spec = specificity({ nodes: found.nodes } as unknown as SSelector);
+    const others = c.nodes.filter((n) => !found.nodes.includes(n));
+    const naturals = found.names.flatMap((n) => BLOCK_WRAPPERS[n]!.natural);
+    const nextTag = next?.nodes
+      .find((n) => n.type === "tag")
+      ?.value.toLowerCase();
+    if (
+      next &&
+      isChild(next.before) &&
+      found.names.length === 1 &&
+      nextTag &&
+      naturals.includes(nextTag)
+    ) {
+      // `div.el-p > p` → `p`: the wrapper's specificity and pseudos move onto it.
+      const target = next.nodes[next.nodes.length - 1]!;
+      const anchor = next.nodes.find(isPseudoElement);
+      for (const n of [...pad(spec), ...others]) {
+        n.remove();
+        if (anchor) anchor.parent!.insertBefore(anchor, n);
+        else target.parent!.insertAfter(target, n);
+      }
+      for (const n of found.nodes) n.remove();
+      next.before!.remove();
+      changed = true;
+      continue;
+    }
+    // Anywhere else, the wrapper is the block itself.
+    const blocks = [
+      ...new Set(found.names.map((n) => BLOCK_WRAPPERS[n]!.block)),
+    ];
+    const first = found.nodes[0]!;
+    for (const q of [...nodesOf(`:where(${blocks.join(", ")})`), ...pad(spec)])
+      first.parent!.insertBefore(first, q);
+    for (const n of found.nodes) n.remove();
+    // `.el-table + div > h2`: the sibling's own wrapper goes too.
+    const sib = all[i + 1];
+    const after = all[i + 2];
+    if (
+      sib &&
+      /^[~+]$/.test(sib.before?.value.trim() ?? "") &&
+      bareDiv(sib) &&
+      after &&
+      isChild(after.before)
+    ) {
+      const target = after.nodes[after.nodes.length - 1]!;
+      const sibSpec = specificity({
+        nodes: sib.nodes.filter((n) => n.type === "tag"),
+      } as unknown as SSelector);
+      const moved = [
+        ...pad(sibSpec),
+        ...sib.nodes.filter((n) => n.type !== "tag"),
+      ];
+      for (const n of moved) {
+        n.remove();
+        target.parent!.insertAfter(target, n);
+      }
+      for (const n of [...sib.nodes]) n.remove();
+      after.before!.remove();
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+/**
  * `.markdown-preview-pusher` is an empty element Obsidian puts before a note's
  * first block, so `.markdown-preview-pusher + div` is the first block. Quartz
  * has no pusher: `pusher + X` → `X:first-child` (a pseudo-class for a class, same
@@ -815,7 +957,8 @@ function processSelector(
   ctx: Ctx,
   top = false,
 ): SelectorResult {
-  const pusher = rewritePusher(sel);
+  const wrappers = rewriteBlockWrappers(sel);
+  const pusher = rewritePusher(sel) || wrappers;
   const properties = rewriteProperties(sel) || pusher;
   const explorer = rewriteExplorer(sel);
   if (explorer === "drop") return { drop: "staticFalse" };

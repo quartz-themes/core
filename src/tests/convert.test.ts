@@ -121,6 +121,31 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("Obsidian's block wrappers (.el-*) are Quartz's blocks", () => {
+    // The wrapper and its element: the element, with the wrapper's specificity.
+    assert.equal(
+      conv("div.el-p > p { margin: 0 }"),
+      "p:not(qt-0):not(.qt-0) { margin: 0 }",
+    );
+    // "A heading after a table": Quartz's table block is .table-container,
+    // and the heading's own wrapper goes.
+    assert.equal(
+      conv(".el-table + div > h2 { margin-top: 3em }"),
+      ":where(.table-container):not(.qt-0)+h2:not(qt-0) { margin-top: 3em }",
+    );
+    // Code blocks: the highlighted figure or a bare pre, never a figure type
+    // selector (theme figure rules stay off Quartz's code figure).
+    assert.equal(
+      conv(".el-pre { border: 1px solid red }"),
+      ":where([data-rehype-pretty-code-figure], :not([data-rehype-pretty-code-figure]) > pre):not(.qt-0) { border: 1px solid red }",
+    );
+    // Lists of wrappers inside :is().
+    assert.match(
+      conv("div:is(.el-p, .el-table) + div > h3 { color: red }"),
+      /^:where\(p, \.table-container\)/,
+    );
+  });
+
   test("the block after Obsidian's pusher is the note's first block", () => {
     // Obsidian: only the first block loses its top margin. Not every block's
     // first child (Quartz's table inside .table-container).
