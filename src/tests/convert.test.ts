@@ -131,23 +131,159 @@ describe("selector rewriting", () => {
     );
   });
 
-  test("the main pane's background paints Quartz's page", () => {
-    // Border's "root split background" option.
-    const out = conv(
-      "body.theme-dark .workspace-split.mod-root .workspace-tabs:not(.mod-top) { background: var(--x) }",
+  test("the boxes behind the note paint Quartz's page, each in its layer", () => {
+    // Border's "root split background" option: the tabs' layer, with the
+    // rule's body conditions and specificity. A lone `var()` may be a colour
+    // or an image: it feeds the colour and the tail image.
+    assert.match(
+      conv(
+        "body.theme-dark .workspace-split.mod-root .workspace-tabs:not(.mod-top) { background: var(--x) }",
+      ),
+      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ --qt-bg5-color: var\(--x\); --qt-bg5-image: none; --qt-bg5-tail: var\(--x\) \}/,
+    );
+    // Outer boxes get their own (outer) layers; a shorthand splits into colour and images.
+    assert.equal(
+      conv(".app-container { background: #111 linear-gradient(red, blue) }"),
+      "body:not(.qt-0) { --qt-bg9-color: #111; --qt-bg9-image: linear-gradient(red, blue); --qt-bg9-tail: none }",
     );
     assert.match(
-      out,
-      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ background: var\(--x\) \}/,
+      conv(".workspace { background-color: red }"),
+      /\{ --qt-bg7-color: red \}/,
     );
-    // Sidebars and transparent panes are left alone.
+    // Every leaf includes the main one (Obsidian's own `.workspace-tabs .workspace-leaf`).
+    assert.match(
+      conv(".workspace-tabs .workspace-leaf { background-color: red }"),
+      /\{ --qt-bg3-color: red \}/,
+    );
+    // Body classes the rule requires stay (Style Settings toggles).
+    assert.match(
+      conv(".my-toggle .view-content { background-color: red }"),
+      /^body\.my-toggle[^ ]* \{ --qt-bg1-color: red \}/,
+    );
+    // Transparent still overrides a less specific rule for the same box.
+    assert.match(
+      conv(".mod-root .view-content { background: transparent }"),
+      /--qt-bg1-color: transparent; --qt-bg1-image: none/,
+    );
+    // Body's own backgrounds go to the bottom slot.
+    assert.equal(
+      conv("body { background: url(x.png) center / cover; color: red }"),
+      "body { --qt-bg10-color: transparent; --qt-bg10-image: url(x.png); --qt-bg10-tail: none; color: red }",
+    );
+    assert.equal(
+      conv("body { background-size: cover }"),
+      "body { --qt-bg10-size: cover }",
+    );
+    // The note's own view type counts (Trailside, DDLC, Green Holiday).
+    assert.match(
+      conv(
+        '.workspace-leaf-content[data-type="markdown"] .view-content { background-color: red }',
+      ),
+      /\{ --qt-bg1-color: red \}/,
+    );
+    // Images over a colour variable keep the images (Imperium's vignette).
+    assert.match(
+      conv(".view-content { background: var(--vignette), var(--bg) }"),
+      /--qt-bg1-color: var\(--bg\); --qt-bg1-image: var\(--vignette\); --qt-bg1-tail: var\(--bg\)/,
+    );
+    // A variable holding images and a colour feeds both halves (AbsolutelyGlass).
+    const glass = conv(
+      ":root { --amb: radial-gradient(red, blue), #eee } body { background: var(--amb) }",
+    );
+    assert.match(
+      glass,
+      /--amb--qt-img: radial-gradient\(red, blue\); --amb--qt-col: #eee/,
+    );
+    assert.match(
+      glass,
+      /--qt-bg10-color: var\(--amb--qt-col\); --qt-bg10-image: none; --qt-bg10-tail: var\(--amb--qt-img\)/,
+    );
+    // Font stacks and other comma lists are left alone.
+    assert.doesNotMatch(
+      conv(":root { --f: Inter, sans-serif } body { font-family: var(--f) }"),
+      /--qt-img/,
+    );
+    // An `:is()` of boxes paints each (Glassfelt's transparent panes).
+    assert.match(
+      conv(
+        ".mod-root :is(.view-header, .view-content, .markdown-source-view) { background: transparent }",
+      ),
+      /\{ --qt-bg1-color: transparent/,
+    );
+    // A bare `.workspace-split` is also the main split (Byrcen Breathe).
+    assert.match(
+      conv(".workspace-split { background: transparent }"),
+      /\{ --qt-bg6-color: transparent/,
+    );
+    assert.doesNotMatch(
+      conv(".workspace-split.mod-horizontal { background: red }"),
+      /--qt-bg/,
+    );
+    // Sidebars, popovers and other view types are left alone.
     assert.equal(
       conv(".mod-left-split .workspace-tabs { background: red }"),
       "",
     );
     assert.doesNotMatch(
-      conv(".mod-root .view-content { background: transparent }"),
-      /body/,
+      conv('.workspace-leaf-content[data-type="graph"] { background: red }'),
+      /--qt-bg/,
+    );
+    // Any other view type, also by prefix (Kakano's plugin tabs).
+    assert.doesNotMatch(
+      conv(
+        '.workspace-leaf-content[data-type^="swar8080"] .view-content { background: red }',
+      ),
+      /--qt-bg/,
+    );
+    assert.doesNotMatch(
+      conv(
+        '.workspace-leaf-content:not([data-type="markdown"]) > .view-content { background: red }',
+      ),
+      /--qt-bg/,
+    );
+  });
+
+  test("nested rules are flattened before conversion", () => {
+    const flat = (css: string) => conv(css).replace(/\s+/g, " ");
+    // Descendants of the parent (dashboard's `body { .view-content { … } }`).
+    assert.match(
+      conv(
+        'body { color: red; .workspace-leaf-content[data-type="markdown"] .view-content { background-image: linear-gradient(red, blue) } }',
+      ),
+      /--qt-bg1-image: linear-gradient\(red, blue\)/,
+    );
+    // `&` is the parent; declarations after a nested rule keep their place.
+    assert.equal(
+      flat(
+        ".callout { color: red; &[data-callout=tip] { color: blue } margin: 0 }",
+      ),
+      flat(
+        ".callout { color: red } .callout[data-callout=tip] { color: blue } .callout { margin: 0 }",
+      ),
+    );
+    // A parent list is expanded at the list's specificity; a leading
+    // combinator is a child.
+    assert.equal(
+      flat("h1, .x h2 { > a { color: red } }"),
+      flat("h1:not(.qt-0) > a, .x h2 > a { color: red }"),
+    );
+    // Exactly: an alternative padding can't reach counts for nothing (evangelion's
+    // `body, .theme-dark { * { … } }` mustn't outrank `.markdown-rendered p`).
+    assert.equal(
+      flat(".a, body { * { margin: 0 } }"),
+      flat(".a *, :where(body):not(.qt-0) * { margin: 0 }"),
+    );
+    // An editor-only alternative doesn't take the others with it (Retroma).
+    assert.match(
+      conv(
+        ".is-live-preview input[type=checkbox], li > input[type=checkbox] { &:checked { background: none } }",
+      ),
+      /li ?> ?input\[type=checkbox\][^{]*:checked/,
+    );
+    // Nested at-rules wrap the parent.
+    assert.equal(
+      flat(".callout { @media (max-width: 600px) { color: red } }"),
+      flat("@media (max-width: 600px) { .callout { color: red } }"),
     );
   });
 

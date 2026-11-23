@@ -9,6 +9,7 @@
  * plus a bridge that points Quartz's own variables at Obsidian's, so
  * Quartz-only components (graph, search, explorer chrome…) follow the theme.
  */
+import { backdropCss, backdropProperties } from "./backdrop";
 import { QUARTZ_FONT_BRIDGE } from "./fonts";
 
 /** Quartz variable → Obsidian variable. Defined on <body>, where Obsidian defines its vars. */
@@ -267,6 +268,7 @@ export function composeStylesheet({
 }: ComposeInput) {
   const main = [
     "@layer quartz-base, obsidian;",
+    backdropProperties(),
     "@layer obsidian {",
     reset && CONTENT_RESET,
     reset && PROPERTIES_RESET,
@@ -278,6 +280,7 @@ export function composeStylesheet({
     theme,
     settings,
     quartzFonts && quartzFontsCss(),
+    backdropCss(),
     "}",
     EXPLORER_CSS,
   ]

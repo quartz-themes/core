@@ -43,11 +43,26 @@
   and Obsidian's own CSS) apply to the blocks Quartz renders: `div.el-p > p` is the paragraph,
   `.el-table` Quartz's `.table-container`, `.el-pre` the code block. Headings after tables and code
   blocks get Obsidian's spacing again.
-- A theme's background for the main pane, behind the note (`.mod-root .workspace-tabs`,
-  `.workspace-leaf-content`…; Border's "root split background", Prism, Primary) paints Quartz's
-  page, which is what sits behind the note there. Obsidian's `.is-read-mode .markdown-preview-view`
-  background no longer covers it: Obsidian 1.x marks the reading view with `data-mode="preview"`,
-  so that rule is dead there.
+- What a theme paints behind the note paints Quartz's page, composited as in Obsidian. Obsidian
+  stacks several boxes there (the reading view, `.view-content`, the leaf, the tabs, the main
+  split, `.workspace`, `.horizontal-main-container`, `.app-container`, `body`); the innermost
+  opaque one shows and translucent ones blend over the rest. Each now gets its own background
+  layer on Quartz's `<body>`, so a theme that paints both the app container and the pane shows
+  the pane (Composer, Duskstone, Retroma), glass and gradient overlays blend over the backdrop
+  (Green Holiday, Agate, Ember Glazz), and Style Settings toggles that gate a pane background
+  still apply (Border's "root split background"). Image layers over a colour variable keep
+  their images (Imperium's vignette), as do variables that hold a whole background
+  (AbsolutelyGlass's `--ca-ambient`); `:is()` lists of boxes paint each box, a bare
+  `.workspace-split` is the main split too, and rules for other view types
+  (`:not([data-type="markdown"])`) stay out. Obsidian's `.is-read-mode
+.markdown-preview-view` background no longer covers it: Obsidian 1.x marks the reading view
+  with `data-mode="preview"`, so that rule is dead there.
+- Nested CSS (`body { .view-content { … } }`, `.callout { &[data-callout=tip] { … } }`, in 98
+  themes) is converted: nested rules are flattened first, as the browser matches them. They used
+  to pass through unconverted, matching Quartz's markup only by accident.
+- Platform rules resolve as on Linux: themes that make the window translucent on macOS
+  (`:not(.mod-windows):not(.mod-linux) { --background-primary: transparent }`) left the page
+  unpainted (Claudian, Meridian), as no platform matched.
 - Rules for the reading view's sizer under `:is(.markdown-preview-view, .markdown-rendered)`
   apply to the note (Blue Topaz's letter spacing and line height).
 - Style Settings selects whose options aren't strings (AnuPpuccin's numeric font weights) are

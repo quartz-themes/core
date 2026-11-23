@@ -268,9 +268,13 @@ export const BODY_STATE: Record<string, boolean | "mode"> = {
   "is-fullscreen": false,
   "is-popout-window": false,
   "native-scrollbars": false,
+  // One platform, and not macOS: themes make the window translucent there
+  // (`:not(.mod-windows):not(.mod-linux) { --background-primary: transparent }`),
+  // showing the desktop through it, which a web page can't. With no platform
+  // at all, such rules would leave the page unpainted (Claudian, Meridian).
   "mod-macos": false,
   "mod-windows": false,
-  "mod-linux": false,
+  "mod-linux": true,
   "mod-rtl": false,
   "is-grabbing": false,
   "colorful-frame": false,

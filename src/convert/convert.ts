@@ -30,10 +30,18 @@ import postcss, {
 const safeParseRoot = (css: string, opts: { from: string }) =>
   safeParse(css, opts) as Root;
 import safeParse from "postcss-safe-parser";
+import { flattenNesting } from "./nesting";
 import selectorParser from "postcss-selector-parser";
 // The prebuilt bundle: css-tree's lib/ loads JSON at runtime, which breaks once bundled.
 import * as csstree from "css-tree/dist/csstree.esm";
 import { Features, transform } from "lightningcss";
+import {
+  BACKDROP_LAYERS,
+  BACKGROUND_PROP,
+  BODY_LAYER,
+  layerDecls,
+  splitBackgroundVars,
+} from "./backdrop";
 import {
   BODY_STATE,
   WRAPPER_CLASSES,
@@ -56,7 +64,7 @@ import {
 
 type SNode = selectorParser.Node;
 type SSelector = selectorParser.Selector;
-type Spec = [number, number, number];
+export type Spec = [number, number, number];
 
 const LOGICAL_PSEUDOS = new Set([
   ":is",
@@ -124,7 +132,7 @@ function isPseudoElement(n: SNode): boolean {
 }
 
 /** Nodes that match any element and add the given specificity. */
-function pad([a, b, c]: Spec): SNode[] {
+export function pad([a, b, c]: Spec): SNode[] {
   const parts: string[] = [];
   for (let i = 0; i < a; i++) parts.push(":not(#qt-0)");
   for (let i = 0; i < b; i++) parts.push(":not(.qt-0)");
@@ -232,87 +240,203 @@ function parseLikeBrowser(css: string, warnings: string[]): Root {
 /** Custom properties that hold an Obsidian icon id. */
 const ICON_PROPS = /^--(callout-icon|checkbox-icon|.*-icon)$/;
 
-/** The main pane's wrappers, around the note (`.mod-root .workspace-tabs`, …). */
-const ROOT_PANE_CLASSES = new Set([
-  "workspace-tabs",
-  "workspace-tab-container",
-  "workspace-leaf",
-  "workspace-leaf-content",
-  "view-content",
-  "markdown-reading-view",
-]);
-const PANE_BACKGROUND = /^background(-color|-image)?$/i;
+/**
+ * Rules that paint a box of Obsidian's main pane that isn't the main pane's:
+ * a sidebar, a popover, another view type, an editor.
+ */
+const OTHER_PANE =
+  /mod-left-split|mod-right-split|mod-sidedock|side-dock|workspace-drawer|workspace-fake-target|popover|is-sidebar|ribbon|modal|mod-stacked|:not\(\.mod-root\)|:not\(\[data-type\s*=\s*["']?markdown|data-type\s*(?:[~|^$*]?=\s*(?!["']?markdown["'\]\s])|[~|^$*]=)|data-mode\s*=\s*["']?source|markdown-source-view|is-live-preview|is-translucent|is-fullscreen/;
+
+/** Obsidian's backdrop layer a compound is (see backdrop.ts), or -1. */
+function backdropLayer(c: Compound): number {
+  const classes = classesOf(c);
+  if (
+    !classes.length ||
+    c.nodes.some((n) => n.type === "tag" && n.value !== "div")
+  )
+    return -1;
+  // Only the layer's own classes and wrapper state (`.mod-active`, `.is-focused`…).
+  if (
+    classes.some(
+      (k) =>
+        !WRAPPER_CLASSES.has(k) && !/^(mod|is)-/.test(k) && k !== "mod-root",
+    )
+  )
+    return -1;
+  for (let i = 0; i < BACKDROP_LAYERS.length; i++)
+    if (classes.includes(BACKDROP_LAYERS[i]!)) return i;
+  // A bare `.workspace-split` matches the main split too (`.workspace-split
+  // .mod-vertical.mod-root`); horizontal ones are sidebars or nested splits.
+  if (
+    classes.includes("workspace-split") &&
+    !classes.includes("mod-horizontal")
+  )
+    return BACKDROP_LAYERS.indexOf("mod-root");
+  return -1;
+}
 
 /**
- * Themes paint the main pane, behind the note, on its wrappers
- * (Border: `body.theme-dark .workspace-split.mod-root .workspace-tabs`). Those
- * wrappers don't exist in Quartz, where the page itself is behind the note: a
- * copy of the rule's backgrounds goes onto the body part of the selector, at
- * the same specificity, and the main pass maps it like any body rule.
+ * A selector whose subject has an `:is()` / `:where()` of compounds, once per
+ * alternative (`.leaf :is(.view-header, .view-content)` paints `.view-content`).
  */
-function paneBackgrounds(root: Root): void {
-  const copies: [Rule, string[], Declaration[]][] = [];
+function subjectAlternatives(sel: SSelector): SSelector[] {
+  const all = splitCompounds(sel);
+  const subject = all[all.length - 1]!;
+  const is = subject.nodes.find(
+    (n): n is selectorParser.Pseudo =>
+      n.type === "pseudo" &&
+      /^:(is|where|matches|-webkit-any)$/i.test(n.value) &&
+      n.nodes.length > 0 &&
+      n.nodes.every((a) => !a.nodes.some((x) => x.type === "combinator")),
+  );
+  if (!is) return [sel];
+  const at = sel.index(is);
+  return is.nodes.flatMap((alt) => {
+    const copy = sel.clone() as SSelector;
+    copy.at(at).replaceWith(...alt.clone().nodes);
+    return subjectAlternatives(copy);
+  });
+}
+
+/**
+ * Themes paint the boxes behind the note (Border: `body.theme-dark
+ * .workspace-split.mod-root .workspace-tabs`; Agate: `.app-container`). Those
+ * boxes don't exist in Quartz, where the page itself is behind the note: each
+ * rule is copied onto `<body>` as its layer's variables, at the same
+ * specificity, keeping the classes it requires of `<body>` (Style Settings
+ * toggles, `.theme-dark`), and the main pass maps it like any body rule.
+ * Transparent values are copied too: they override a less specific rule for
+ * the same box (Obsidian's own pane backgrounds).
+ */
+function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
+  const copies: [Rule, Map<number, string[]>, Declaration[]][] = [];
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
-    // A transparent pane shows what's painted further out (body, workspace),
-    // which in Quartz is the page itself: nothing to copy.
     const decls = (rule.nodes ?? []).filter(
       (n): n is Declaration =>
-        n.type === "decl" &&
-        PANE_BACKGROUND.test(n.prop) &&
-        !/^(transparent|none|initial|inherit|unset)\b|rgba\([^)]*,\s*0\)/i.test(
-          n.value.trim(),
-        ),
+        n.type === "decl" && BACKGROUND_PROP.test(n.prop),
     );
     if (!decls.length) return;
-    const bodies: string[] = [];
+    const byLayer = new Map<number, string[]>();
+    try {
+      selectorParser((selectors) => {
+        selectors.each((whole) => {
+          const spec = specificity(whole);
+          for (const sel of subjectAlternatives(whole)) paint(sel, spec);
+        });
+        function paint(sel: SSelector, spec: Spec): void {
+          if (OTHER_PANE.test(String(sel))) return;
+          const all = splitCompounds(sel);
+          const subject = all[all.length - 1]!;
+          if (
+            subject.nodes.some(
+              (n) =>
+                n.type === "pseudo" &&
+                (isPseudoElement(n) ||
+                  /^:(hover|focus|active|focus-within|focus-visible)/.test(
+                    n.value,
+                  )),
+            )
+          )
+            return;
+          const layer = backdropLayer(subject);
+          if (layer < 0) return;
+          // Body conditions: a body-ish first compound, else non-wrapper
+          // classes and :not()s of the ancestors (Style Settings toggles live
+          // on <body>).
+          const first = all[0]!;
+          const bodyish =
+            all.length > 1 &&
+            first.nodes.some(
+              (n) =>
+                (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
+                (n.type === "class" && /^theme-(dark|light)$/.test(n.value)),
+            );
+          const conds: SNode[] = [];
+          if (bodyish)
+            conds.push(...first.nodes.filter((n) => n.type !== "tag"));
+          for (const c of all.slice(bodyish ? 1 : 0, -1))
+            for (const n of c.nodes)
+              if (
+                (n.type === "class" &&
+                  !WRAPPER_CLASSES.has(n.value) &&
+                  !/^mod-/.test(n.value)) ||
+                (n.type === "pseudo" &&
+                  /^:not$/i.test(n.value) &&
+                  backdropLayer(c) < 0 &&
+                  !classesOf(c).length)
+              )
+                conds.push(n);
+          const head = `body${conds.map(String).join("")}`;
+          const own = specificity(selectorParser().astSync(head).first);
+          const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
+          const padded = `${head}${pad(rest).map(String).join("")}`;
+          if (!byLayer.has(layer)) byLayer.set(layer, []);
+          byLayer.get(layer)!.push(padded);
+        }
+      }).processSync(rule.selector);
+    } catch {
+      return;
+    }
+    if (byLayer.size) copies.push([rule, byLayer, decls]);
+  });
+  for (const [rule, byLayer, decls] of copies)
+    for (const [layer, bodies] of byLayer) {
+      const copy = postcss.rule({ selector: [...new Set(bodies)].join(", ") });
+      for (const d of decls) copy.append(...layerDecls(d, layer, split));
+      if (copy.nodes.length) rule.before(copy);
+    }
+}
+
+/**
+ * `<body>`'s own backgrounds go to its slot, so the layers above it can paint
+ * over them (backdrop.ts). After the main pass: by then every body rule's
+ * subject is `body` (`.theme-dark` → `:where(body):is(…)`).
+ */
+function bodyBackgrounds(root: Root, split: ReadonlySet<string>): void {
+  root.walkRules((rule) => {
+    const parent = rule.parent as AtRule | undefined;
+    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
+    if (
+      !rule.nodes?.some(
+        (n) => n.type === "decl" && BACKGROUND_PROP.test(n.prop),
+      )
+    )
+      return;
+    const body: string[] = [];
+    const other: string[] = [];
     try {
       selectorParser((selectors) => {
         selectors.each((sel) => {
           const all = splitCompounds(sel);
           const subject = all[all.length - 1]!;
-          if (!classesOf(subject).some((c) => ROOT_PANE_CLASSES.has(c))) return;
-          if (
-            subject.nodes.some(
-              (n) =>
-                n.type === "pseudo" &&
-                (isPseudoElement(n) || /^:(hover|focus|active)/.test(n.value)),
-            )
-          )
-            return;
-          // The main pane only, not a sidebar or a stacked/popover leaf.
-          if (!all.some((c) => classesOf(c).includes("mod-root"))) return;
-          const first = all[0]!;
-          const bodyish = first.nodes.some(
-            (n) =>
-              (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
-              (n.type === "class" && /^theme-(dark|light)$/.test(n.value)),
-          );
-          const spec = specificity(sel);
-          const head =
-            bodyish && all.length > 1
-              ? first.nodes.map(String).join("").trim()
-              : "body";
-          const own =
-            bodyish && all.length > 1
-              ? specificity({ nodes: first.nodes } as unknown as SSelector)
-              : ([0, 0, 1] as Spec);
-          const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
-          const padded = `${head}${pad(rest).map(String).join("")}`;
-          bodies.push(padded);
+          const isBody =
+            !subject.nodes.some(
+              (n) => n.type === "pseudo" && isPseudoElement(n),
+            ) &&
+            /(^|[^\w.#-])body(?![\w-])/.test(
+              subject.nodes.map(String).join(""),
+            );
+          (isBody ? body : other).push(String(sel).trim());
         });
       }).processSync(rule.selector);
     } catch {
       return;
     }
-    if (bodies.length) copies.push([rule, bodies, decls]);
+    if (!body.length) return;
+    const target = other.length
+      ? rule.clone({ selector: body.join(", ") })
+      : rule;
+    if (other.length) {
+      rule.selector = other.join(", ");
+      rule.after(target);
+    }
+    target.each((n) => {
+      if (n.type === "decl" && BACKGROUND_PROP.test(n.prop))
+        n.replaceWith(...layerDecls(n, BODY_LAYER, split));
+    });
   });
-  for (const [rule, bodies, decls] of copies) {
-    const copy = postcss.rule({ selector: [...new Set(bodies)].join(", ") });
-    for (const d of decls) copy.append(d.clone());
-    rule.before(copy);
-  }
 }
 
 export function convertObsidianCss(
@@ -359,8 +483,10 @@ export function convertObsidianCss(
   root.walkComments((c) => {
     c.remove();
   });
+  flattenNesting(root);
 
-  paneBackgrounds(root);
+  const split = splitBackgroundVars(root);
+  paneBackgrounds(root, split);
 
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
@@ -429,6 +555,8 @@ export function convertObsidianCss(
     }
     stats.selectors.out += out.split(",").length;
   });
+
+  bodyBackgrounds(root, split);
 
   if (opts.resolveIcon) {
     root.walkDecls(ICON_PROPS, (decl) => {
@@ -954,7 +1082,7 @@ function rewriteProperties(sel: SSelector): boolean {
  * specificity), so each alternative is guarded on its own.
  */
 /** Selectors Level 4 specificity of a complex selector. */
-function specificity(sel: SSelector | SNode): Spec {
+export function specificity(sel: SSelector | SNode): Spec {
   const spec: Spec = [0, 0, 0];
   const add = (s: Spec) => {
     spec[0] += s[0];
