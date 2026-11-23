@@ -62,6 +62,11 @@ export const APP_ONLY_PREFIXES = [
   // themes' rules for it are dead there. Quartz's explorer carried the class, so
   // Catppuccin's `display: none` hid the only way to open a folder.
   "nav-folder-collapse-indicator",
+  // Obsidian 1.x marks the reading view with `[data-mode="preview"]`; the
+  // leaf no longer gets `.is-read-mode`, so app.css's opaque
+  // `.is-read-mode .markdown-preview-view` background is dead there. Applied,
+  // it hid a theme's main-pane background behind the note (Primary, Border).
+  "is-read-mode",
 ];
 
 /**
@@ -120,7 +125,6 @@ export const WRAPPER_CLASSES = new Set<string>([
   "markdown-preview-section",
   "markdown-preview-pusher",
   "is-readable-line-width",
-  "is-read-mode", // the leaf is in reading view — always true for Quartz pages
   "allow-fold-headings",
   "allow-fold-lists",
   "show-indentation-guide",

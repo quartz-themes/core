@@ -473,6 +473,13 @@ describe("selector rewriting", () => {
       conv(".nav-folder-collapse-indicator svg { display: none }"),
       "",
     );
+    // Nor `.is-read-mode` on the leaf (it uses `[data-mode="preview"]`).
+    assert.equal(
+      conv(
+        ".workspace-leaf-content.is-read-mode .markdown-preview-view { background-color: var(--background-primary) }",
+      ),
+      "",
+    );
     // Every folder is "not the root".
     assert.equal(
       conv(".nav-folder:not(.mod-root) > .nav-folder-title { color: red }"),

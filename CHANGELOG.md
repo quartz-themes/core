@@ -45,7 +45,9 @@
   blocks get Obsidian's spacing again.
 - A theme's background for the main pane, behind the note (`.mod-root .workspace-tabs`,
   `.workspace-leaf-content`…; Border's "root split background", Prism, Primary) paints Quartz's
-  page, which is what sits behind the note there.
+  page, which is what sits behind the note there. Obsidian's `.is-read-mode .markdown-preview-view`
+  background no longer covers it: Obsidian 1.x marks the reading view with `data-mode="preview"`,
+  so that rule is dead there.
 - Rules for the reading view's sizer under `:is(.markdown-preview-view, .markdown-rendered)`
   apply to the note (Blue Topaz's letter spacing and line height).
 - Style Settings selects whose options aren't strings (AnuPpuccin's numeric font weights) are
