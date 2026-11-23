@@ -121,6 +121,25 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("properties rules scoped to the reading view reach Quartz's properties block", () => {
+    // Quartz renders properties above the note, outside .markdown-preview-view.
+    assert.equal(
+      conv(".markdown-preview-view .metadata-container { background: red }"),
+      ":not(.qt-0) .metadata-container { background: red }",
+    );
+    assert.equal(
+      conv(
+        ".theme-dark .markdown-rendered.is-readable .metadata-property-key { color: red }",
+      ),
+      ':where(body):is([saved-theme="dark"] *) :not(.qt-0).is-readable .metadata-property-key { color: red }',
+    );
+    // Unscoped and unrelated rules are untouched.
+    assert.equal(
+      conv(".metadata-container { background: red }"),
+      ".metadata-container { background: red }",
+    );
+  });
+
   test("bare list and link rules style notes, not Quartz's explorer or table of contents", () => {
     // Blue Topaz: meant for note lists; Quartz's explorer is `ul > li`.
     assert.equal(

@@ -644,6 +644,38 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
   return changed;
 }
 
+/** The reading view and its wrappers, which hold Obsidian's properties block. */
+const READING_VIEW_CLASSES = new Set([
+  "markdown-preview-view",
+  "markdown-rendered",
+  "markdown-reading-view",
+  "markdown-preview-sizer",
+  "markdown-preview-section",
+]);
+
+/**
+ * Obsidian renders a note's properties inside the reading view; Quartz's
+ * properties block (note-properties) sits above the note, outside it. So
+ * `.markdown-preview-view .metadata-container` → `:not(.qt-0) .metadata-container`:
+ * the ancestor matches anything, with the same specificity.
+ */
+function rewriteProperties(sel: SSelector): boolean {
+  const all = splitCompounds(sel);
+  const subject = all.findIndex((c) =>
+    classesOf(c).some((n) => n.startsWith("metadata-")),
+  );
+  if (subject <= 0) return false;
+  let changed = false;
+  for (const c of all.slice(0, subject)) {
+    for (const n of [...c.nodes]) {
+      if (n.type !== "class" || !READING_VIEW_CLASSES.has(n.value)) continue;
+      n.replaceWith(...pad([0, 1, 0]));
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /**
  * `:is(.nav-files-container, .search-result-container) { container-type: size }`:
  * when only some alternatives of a whole-selector `:is()` are Quartz's own
@@ -740,10 +772,11 @@ function processSelector(
   ctx: Ctx,
   top = false,
 ): SelectorResult {
+  const properties = rewriteProperties(sel);
   const explorer = rewriteExplorer(sel);
   if (explorer === "drop") return { drop: "staticFalse" };
   const compounds = splitCompounds(sel);
-  let changed = explorer;
+  let changed = explorer || properties;
   let anyConcrete = false;
   let anyElided = false;
   let structural = false;

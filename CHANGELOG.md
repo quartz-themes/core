@@ -32,6 +32,10 @@
 - Checked checkboxes show Obsidian's checkmark (and themes' custom ones) instead of Quartz's:
   rules on bare elements with a single-colon pseudo-element (`input:checked:after`) were
   scoped into an invalid selector and dropped.
+- Properties rules scoped to the reading view (`.markdown-preview-view .metadata-container`, in
+  71 themes and Obsidian's own CSS) apply to Quartz's properties block, which sits above the note
+  rather than inside it. With note-properties' Obsidian markup, themes style properties as in
+  Obsidian.
 
 ## 3.1.1
 
