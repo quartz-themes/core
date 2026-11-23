@@ -527,6 +527,20 @@ describe("compose", () => {
     assert.match(main, /@layer obsidian \{[\s\S]*body \{ color: red \}/);
   });
 
+  test("the properties block starts from UA styles in the obsidian layer", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /@layer obsidian \{[\s\S]*:where\(\.metadata-container, \.metadata-container :not\(svg, svg \*\)\) \{\n {2}all: revert;/,
+    );
+    assert.equal(
+      composeStylesheet({ app: "", theme: "", reset: false }).main.includes(
+        "metadata-container",
+      ),
+      false,
+    );
+  });
+
   test("code tokens take the theme's --code-* colours, below theme rules", () => {
     const { main } = composeStylesheet({ app: "", theme: "" });
     assert.match(

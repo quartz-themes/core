@@ -46,6 +46,25 @@ export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h
 `;
 
 /**
+ * The properties block (note-properties renders Obsidian's `metadata-*`
+ * markup): like note content, Quartz's own styles would show through wherever
+ * Obsidian's CSS leaves a property unset (the plugin's bold heading, table-like
+ * key column, pill shape). Reset it to UA styles first, as Obsidian's CSS
+ * expects. Icons keep their size attributes; the `<summary>` marker stays
+ * hidden, as Obsidian's heading has none.
+ */
+export const PROPERTIES_RESET = `:where(.metadata-container, .metadata-container :not(svg, svg *)) {
+  all: revert;
+}
+:where(.metadata-container > summary) {
+  list-style: none;
+}
+:where(.metadata-container > summary)::-webkit-details-marker {
+  display: none;
+}
+`;
+
+/**
  * Obsidian renders callout icons as an <svg> sized by --icon-size in the
  * callout colour; Quartz renders an empty .callout-icon. Paint the icon the
  * converter resolved into --callout-icon (a data URI) as a mask in
@@ -243,6 +262,7 @@ export function composeStylesheet({
     "@layer quartz-base, obsidian;",
     "@layer obsidian {",
     reset && CONTENT_RESET,
+    reset && PROPERTIES_RESET,
     CALLOUT_ICON_CSS,
     CODE_TOKEN_CSS,
     resetCss(),
