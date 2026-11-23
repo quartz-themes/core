@@ -38,6 +38,9 @@
   Quartz's own properties styles don't show through; property pills (`.multi-select-pill`) are
   styled instead of dropped as app UI. With note-properties' Obsidian markup,
   themes style properties as in Obsidian.
+- Style Settings with an id that isn't a valid CSS variable name (Minimal's
+  `cards-background-hover (hover)`) no longer cost every other colour setting: the invalid
+  declaration is left out, as browsers do, instead of the whole block being rejected and lost.
 - Tables keep the space above them: Obsidian's "no top margin for the note's first block" rule
   (`.markdown-preview-pusher + div > :first-child`) applied to the first child of every block,
   including the table inside Quartz's `.table-container`.

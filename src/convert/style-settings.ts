@@ -166,10 +166,16 @@ export function resolveStyleSettings(
     }
     applied.push(key);
   }
-  const block = (sel: string, entries: [string, string][]) =>
-    entries.length
-      ? `${sel} {\n${entries.map(([k, v]) => `  --${k}: ${v};`).join("\n")}\n}\n`
+  // An id that isn't a valid custom property name (Minimal's
+  // `cards-background-hover (hover)`) makes an invalid declaration: the browser
+  // drops just that line, but Quartz's minifier rejects the whole block.
+  const validName = (k: string) => /^[\w-]+$/.test(k);
+  const block = (sel: string, entries: [string, string][]) => {
+    const valid = entries.filter(([k]) => validName(k));
+    return valid.length
+      ? `${sel} {\n${valid.map(([k, v]) => `  --${k}: ${v};`).join("\n")}\n}\n`
       : "";
+  };
   const css =
     block("body.css-settings-manager", general) +
     block("body.theme-light.css-settings-manager", light) +
