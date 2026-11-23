@@ -48,10 +48,9 @@ import {
   BARE_TAGS,
   LANGUAGE_CLASS_PREFIX,
   QUARTZ_LAYOUT_PREFIXES,
-  EXPLORER_ROOT,
+  FILES_CONTAINER,
   TREE_ITEM_CLASSES,
-  TREE_TITLE_CLASSES,
-  TREE_CHILDREN_CLASSES,
+  TREE_PART_CLASSES,
   isAppOnly,
 } from "./profile";
 
@@ -591,70 +590,37 @@ const isTreeRoot = (c: Compound, next?: Compound) => {
     classes.length === 1 &&
     !!next &&
     isChild(next.before) &&
-    classesOf(next).some(
-      (v) =>
-        TREE_TITLE_CLASSES.includes(v) || TREE_CHILDREN_CLASSES.includes(v),
-    )
+    classesOf(next).some((v) => TREE_PART_CLASSES.includes(v))
   );
 };
 
 /**
- * Obsidian's vault-root folder → Quartz's explorer list (see EXPLORER_ROOT):
- * `.nav-folder.mod-root > .nav-folder-children > .nav-folder` →
- * `:where(.explorer-ul):not(.qt-0)… > .nav-folder`; a rule for the root's
- * title row (the vault name) matches nothing in Quartz. Specificity is kept.
+ * Obsidian's explorer → Quartz's (see FILES_CONTAINER): rules for the pre-1.0
+ * vault-root folder are dropped; `.nav-files-container > div > .nav-folder` →
+ * `.nav-files-container:not(qt-0) > .nav-folder` (same specificity).
  * Returns whether the selector changed, or "drop".
  */
-function rewriteTreeRoot(sel: SSelector): boolean | "drop" {
+function rewriteExplorer(sel: SSelector): boolean | "drop" {
   let changed = false;
-  for (let i = 0, all = splitCompounds(sel); i < all.length; i++) {
-    const next = all[i + 1];
-    if (!isTreeRoot(all[i]!, next)) continue;
-    if (next && isChild(next.before)) {
-      const nc = classesOf(next);
-      if (nc.some((v) => TREE_TITLE_CLASSES.includes(v))) return "drop";
-      // `> .nav-folder-children` (optionally `div.`, `:hover`, `::before`)
-      // is the list itself.
-      const own = (n: SNode) =>
-        (n.type === "class" && TREE_CHILDREN_CLASSES.includes(n.value)) ||
-        n.type === "tag";
-      if (
-        nc.some((v) => TREE_CHILDREN_CLASSES.includes(v)) &&
-        next.nodes.every((n) => own(n) || n.type === "pseudo")
-      ) {
-        const spec: Spec = [
-          0,
-          next.nodes.filter((n) => n.type === "class").length,
-          next.nodes.filter((n) => n.type === "tag").length,
-        ];
-        const last = all[i]!.nodes[all[i]!.nodes.length - 1]!;
-        next.before!.remove();
-        for (const n of next.nodes) if (own(n)) n.remove();
-        // After the root's own nodes, before the children's pseudos.
-        for (const p of pad(spec).reverse()) last.parent!.insertAfter(last, p);
-      }
+  const all = splitCompounds(sel);
+  for (let i = 0; i < all.length; i++)
+    if (isTreeRoot(all[i]!, all[i + 1])) return "drop";
+  for (let i = all.length - 3; i >= 0; i--) {
+    const wrapper = all[i + 1]!;
+    if (
+      classesOf(all[i]!).includes(FILES_CONTAINER) &&
+      isChild(wrapper.before) &&
+      isChild(all[i + 2]!.before) &&
+      wrapper.nodes.length === 1 &&
+      wrapper.nodes[0]!.type === "tag" &&
+      wrapper.nodes[0]!.value.toLowerCase() === "div"
+    ) {
+      const last = all[i]!.nodes[all[i]!.nodes.length - 1]!;
+      wrapper.before!.remove();
+      wrapper.nodes[0]!.remove();
+      for (const p of pad([0, 0, 1])) last.parent!.insertAfter(last, p);
+      changed = true;
     }
-    const fresh = splitCompounds(sel)[i]!;
-    let spec: Spec = [0, 0, 0];
-    let anchor: SNode | undefined;
-    for (const n of fresh.nodes) {
-      const tree =
-        n.type === "class" &&
-        (n.value === "mod-root" || TREE_ITEM_CLASSES.includes(n.value));
-      if (!tree && n.type !== "tag") continue;
-      spec =
-        n.type === "tag"
-          ? [0, spec[1], spec[2] + 1]
-          : [0, spec[1] + 1, spec[2]];
-      if (anchor) n.remove();
-      else anchor = n;
-    }
-    // `:where()` adds nothing; pad restores the classes' specificity.
-    for (const n of [...nodesOf(`:where(${EXPLORER_ROOT})`), ...pad(spec)])
-      anchor!.parent!.insertBefore(anchor!, n);
-    anchor!.remove();
-    changed = true;
-    all = splitCompounds(sel);
   }
   return changed;
 }
@@ -668,10 +634,10 @@ function processSelector(
   ctx: Ctx,
   top = false,
 ): SelectorResult {
-  const treeRoot = rewriteTreeRoot(sel);
-  if (treeRoot === "drop") return { drop: "staticFalse" };
+  const explorer = rewriteExplorer(sel);
+  if (explorer === "drop") return { drop: "staticFalse" };
   const compounds = splitCompounds(sel);
-  let changed = treeRoot;
+  let changed = explorer;
   let anyConcrete = false;
   let anyElided = false;
   let structural = false;
@@ -798,9 +764,10 @@ function processSelector(
   // Bare form controls and headings: in Quartz they would hit chrome.
   if (top) {
     const subject = results[results.length - 1]!;
-    const ancestorsConcrete = results.slice(0, -1).some((r) => r.concrete);
+    // `.callout ul` is specific enough; `body ul > li` is not.
+    const ancestorsNamed = results.slice(0, -1).some((r) => r.named);
     const control = (subject.tags ?? []).map((t) => BARE_TAGS[t]).find(Boolean);
-    if (control && !subject.named && !ancestorsConcrete) {
+    if (control && !subject.named && !ancestorsNamed) {
       if (control === "drop") return { drop: "appOnly" };
       const last = splitCompounds(sel).at(-1)!.nodes;
       const pseudoEl = last.find(
@@ -932,10 +899,7 @@ function processCompound(
           replace(node, pad(CLASS_SPEC));
           wrapper = true;
           if (CONTENT_WRAPPERS.has(v)) content = true;
-        } else if (
-          QUARTZ_LAYOUT_PREFIXES.some((p) => v.startsWith(p)) ||
-          `.${v}` === EXPLORER_ROOT
-        ) {
+        } else if (QUARTZ_LAYOUT_PREFIXES.some((p) => v.startsWith(p))) {
           concrete = named = true;
           structuralTarget = true;
         } else if (v.startsWith(LANGUAGE_CLASS_PREFIX)) {
@@ -1032,7 +996,11 @@ function processCompound(
           const res = processLogical(node, ctx);
           if (res.drop) return { drop: res.drop };
           if (res.changed) changed = true;
-          if (res.concrete) concrete = named = true;
+          // `li:not(.task-list-item)` is still any li.
+          if (res.concrete) {
+            concrete = true;
+            if (node.value !== ":not") named = true;
+          }
           // `:is(.left.sidebar, .right.sidebar)` is as structural as either.
           if (res.structural) structuralTarget = true;
           if (res.contentRoot) contentRoot = true;

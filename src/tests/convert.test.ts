@@ -115,6 +115,29 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("bare list and link rules style notes, not Quartz's explorer or table of contents", () => {
+    // Blue Topaz: meant for note lists; Quartz's explorer is `ul > li`.
+    assert.equal(
+      conv(
+        "body:not(.x) ul > li:not(.task-list-item) { border-left: none !important }",
+      ),
+      "body:not(.x) ul>li:not(.task-list-item):where(.markdown-rendered *) { border-left: none !important }",
+    );
+    assert.equal(
+      conv("ol li::marker { color: red }"),
+      "ol li:where(.markdown-rendered *)::marker { color: red }",
+    );
+    assert.equal(
+      conv("a { color: var(--link-color) }"),
+      "a:where(.markdown-rendered *) { color: var(--link-color) }",
+    );
+    // Named ancestors are specific enough already.
+    assert.equal(
+      conv(".callout ul { margin: 0 }"),
+      ".callout ul { margin: 0 }",
+    );
+  });
+
   test("bare headings style notes, not Quartz's chrome headings", () => {
     assert.equal(
       conv("h2 { color: var(--h2-color) }"),
@@ -322,12 +345,22 @@ describe("selector rewriting", () => {
     );
   });
 
-  test("the vault-root folder is Quartz's explorer list, not every folder", () => {
-    // Its title row is the vault name: no Quartz counterpart.
+  test("explorer rules follow Obsidian 1.12's tree, not every folder", () => {
+    // Pre-1.0 Obsidian's vault-root folder (and its vault-name row) is gone:
+    // its rules are dead in Obsidian and would hit every folder here.
     assert.equal(
       conv(".nav-folder.mod-root > .nav-folder-title { display: none }"),
       "",
     );
+    assert.equal(
+      conv(
+        ".nav-folder.mod-root > .nav-folder-children > .nav-folder { color: red }",
+      ),
+      "",
+    );
+    assert.equal(conv(".nav-folder.mod-root { display: none }"), "");
+    // Firefly leaves out `.nav-folder`.
+    assert.equal(conv(".mod-root > .nav-folder-title { display: none }"), "");
     // Catppuccin hides the root's folder icon, not every folder's.
     assert.equal(
       conv(
@@ -340,39 +373,28 @@ describe("selector rewriting", () => {
       conv(".nav-folder-collapse-indicator svg { display: none }"),
       "",
     );
+    // Every folder is "not the root".
+    assert.equal(
+      conv(".nav-folder:not(.mod-root) > .nav-folder-title { color: red }"),
+      ".nav-folder:not(.qt-0)>.nav-folder-title { color: red }",
+    );
+    // Top-level items: Obsidian wraps them in a plain div, Quartz's list doesn't
+    // (Blue Topaz's coloured top-level folders).
     assert.equal(
       conv(
-        ".nav-folder.mod-root > .nav-folder-children > .nav-folder { color: red }",
+        ".nav-files-container > div > .nav-folder:nth-child(8n+2) > .nav-folder-title { border-left: 2px solid red }",
       ),
-      ":where(.explorer-ul):not(.qt-0):not(.qt-0):not(.qt-0)>.nav-folder { color: red }",
+      ".nav-files-container:not(qt-0)>.nav-folder:nth-child(8n+2)>.nav-folder-title { border-left: 2px solid red }",
     );
     assert.equal(
-      conv(".nav-folder.mod-root .nav-folder { color: red }"),
-      ":where(.explorer-ul):not(.qt-0):not(.qt-0) .nav-folder { color: red }",
-    );
-    // Quartz lays out its explorer list.
-    assert.equal(
-      conv(".nav-folder.mod-root { display: none; padding: 4px }"),
-      ":where(.explorer-ul):not(.qt-0):not(.qt-0) { padding: 4px }",
+      conv(".nav-files-container > div.foo > .nav-folder { color: red }"),
+      ".nav-files-container > div.foo > .nav-folder { color: red }",
     );
     // Book and Quill: `will-change: transform` would trap the phone
     // explorer's fixed overlay inside the explorer.
     assert.equal(
       conv(".nav-files-container { will-change: transform; padding-top: 4px }"),
       ".nav-files-container { padding-top: 4px }",
-    );
-    // Firefly leaves out `.nav-folder`.
-    assert.equal(conv(".mod-root > .nav-folder-title { display: none }"), "");
-    assert.equal(
-      conv(
-        ".mod-root > .nav-folder-children > .nav-file { border-left: none }",
-      ),
-      ":where(.explorer-ul):not(.qt-0):not(.qt-0)>.nav-file { border-left: none }",
-    );
-    // Every Quartz folder is "not the root".
-    assert.equal(
-      conv(".nav-folder:not(.mod-root) > .nav-folder-title { color: red }"),
-      ".nav-folder:not(.qt-0)>.nav-folder-title { color: red }",
     );
   });
 });

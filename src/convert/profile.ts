@@ -73,19 +73,21 @@ export const APP_ONLY_PREFIXES = [
 export const QUARTZ_LAYOUT_PREFIXES = ["bases-", "nav-files-container"];
 
 /**
- * Obsidian's file explorer nests everything in a vault-root folder
- * (`.nav-folder.mod-root`), whose title row is the vault name. Quartz's
- * explorer has no root folder: its top-level list (EXPLORER_ROOT) holds the
- * top-level folders and files. So the root folder maps onto that list, rules
- * for its children container (`.mod-root > .nav-folder-children`) onto the
- * list itself, and rules for its title row are dropped. Eliding `.mod-root`
- * like a workspace wrapper would make `.nav-folder.mod-root > .nav-folder-title
- * { display: none }` hide every folder.
+ * Obsidian's file explorer (1.12): `.nav-files-container > div > .tree-item`
+ * for top-level items, where the `div` is the vault root's plain children
+ * wrapper (its first child a spacer, like the `li.overflow-end` that starts
+ * Quartz's list, so `:nth-child()` counts agree). Quartz's list holds them
+ * directly. Pre-1.0 Obsidian rendered the root as `.nav-folder.mod-root` with a
+ * title row (the vault name); current Obsidian doesn't, so rules for it are dead
+ * there and dropped here (as ancestors they'd otherwise be elided like a
+ * workspace wrapper, and `.mod-root > .nav-folder-title { display: none }`
+ * would hide every folder).
  */
-export const EXPLORER_ROOT = ".explorer-ul";
+export const FILES_CONTAINER = "nav-files-container";
 export const TREE_ITEM_CLASSES = ["nav-folder", "tree-item"];
-export const TREE_TITLE_CLASSES = ["nav-folder-title", "tree-item-self"];
-export const TREE_CHILDREN_CLASSES = [
+export const TREE_PART_CLASSES = [
+  "nav-folder-title",
+  "tree-item-self",
   "nav-folder-children",
   "tree-item-children",
 ];
@@ -155,6 +157,9 @@ export const CONTENT_ROOT_CLASSES = [
  * checkboxes) are scoped to note content. Bare headings are meant for notes
  * (Obsidian's UI has none to speak of), while Quartz's page title, explorer,
  * graph and table-of-contents titles are headings: scoped to note content.
+ * So are lists and links: Obsidian's explorer and outline are divs, Quartz's
+ * explorer, table of contents, backlinks and tag lists are `ul > li` of `<a>`
+ * (a bare `a { color }` would override the theme's explorer row colours).
  */
 export const BARE_TAGS: Record<string, "drop" | "content"> = {
   button: "drop",
@@ -167,6 +172,10 @@ export const BARE_TAGS: Record<string, "drop" | "content"> = {
   h4: "content",
   h5: "content",
   h6: "content",
+  ul: "content",
+  ol: "content",
+  li: "content",
+  a: "content",
 };
 
 /** Wrapper classes that do have a Quartz counterpart. */

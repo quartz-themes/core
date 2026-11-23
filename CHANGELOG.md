@@ -5,10 +5,14 @@
 - Bases render again: Obsidian lays out its tables as absolutely positioned, virtualised
   `<div>`s, and those layout rules no longer apply to Quartz's `<table>`. Themes still colour
   and border them.
-- Explorer folders no longer disappear or lose their icons: rules for Obsidian's vault-root
-  folder (`.nav-folder.mod-root`, whose title row is the vault name) applied to every folder;
-  they now apply to the explorer's top-level list, and rules for the vault name are dropped
-  (Apex, Firefly, Coding Agent, Catppuccin's folder icons and ~140 other themes).
+- Explorer rules follow Obsidian 1.12's file tree. Rules for the pre-1.0 vault-root folder
+  (`.nav-folder.mod-root`, whose title row was the vault name) are dead in Obsidian and are
+  dropped; they used to apply to every folder, hiding all folders (Apex, Firefly, Coding
+  Agent) or their icons (Catppuccin), in ~140 themes. `.nav-files-container > div > …` rules
+  for top-level folders apply to Quartz's list (Blue Topaz's coloured folders, 67 themes).
+- Bare `ul`, `ol`, `li` and `a` rules only apply inside notes, as bare headings already did:
+  in Obsidian they style notes, in Quartz they also hit the explorer, table of contents and
+  backlinks (Blue Topaz's list borders, app.css's link colour on folder names).
 - Rules for the pre-1.0 `.nav-folder-collapse-indicator`, which Obsidian no longer renders,
   are dropped: Catppuccin and others hid the explorer's chevron with them, leaving no way to
   open a folder.
