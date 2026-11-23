@@ -43,6 +43,13 @@
   and Obsidian's own CSS) apply to the blocks Quartz renders: `div.el-p > p` is the paragraph,
   `.el-table` Quartz's `.table-container`, `.el-pre` the code block. Headings after tables and code
   blocks get Obsidian's spacing again.
+- A theme's background for the main pane, behind the note (`.mod-root .workspace-tabs`,
+  `.workspace-leaf-content`…; Border's "root split background", Prism, Primary) paints Quartz's
+  page, which is what sits behind the note there.
+- Rules for the reading view's sizer under `:is(.markdown-preview-view, .markdown-rendered)`
+  apply to the note (Blue Topaz's letter spacing and line height).
+- Style Settings selects whose options aren't strings (AnuPpuccin's numeric font weights) are
+  ignored, as Style Settings 1.0.9 ignores them.
 - Style Settings with an id that isn't a valid CSS variable name (Minimal's
   `cards-background-hover (hover)`) no longer cost every other colour setting: the invalid
   declaration is left out, as browsers do, instead of the whole block being rejected and lost.

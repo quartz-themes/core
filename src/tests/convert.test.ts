@@ -121,6 +121,36 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("a sizer under :is() of root names is the root itself", () => {
+    // Blue Topaz's letter spacing and line height.
+    assert.equal(
+      conv(
+        ":is(.markdown-preview-view,.markdown-rendered) .markdown-preview-sizer { letter-spacing: 2px }",
+      ),
+      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px }",
+    );
+  });
+
+  test("the main pane's background paints Quartz's page", () => {
+    // Border's "root split background" option.
+    const out = conv(
+      "body.theme-dark .workspace-split.mod-root .workspace-tabs:not(.mod-top) { background: var(--x) }",
+    );
+    assert.match(
+      out,
+      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ background: var\(--x\) \}/,
+    );
+    // Sidebars and transparent panes are left alone.
+    assert.equal(
+      conv(".mod-left-split .workspace-tabs { background: red }"),
+      "",
+    );
+    assert.doesNotMatch(
+      conv(".mod-root .view-content { background: transparent }"),
+      /body/,
+    );
+  });
+
   test("Obsidian's block wrappers (.el-*) are Quartz's blocks", () => {
     // The wrapper and its element: the element, with the wrapper's specificity.
     assert.equal(

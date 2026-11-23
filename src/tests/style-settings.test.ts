@@ -117,3 +117,39 @@ settings:
     assert.doesNotMatch(css, /bad|#654321/);
   });
 });
+
+describe("malformed select options", () => {
+  // AnuPpuccin: `value: 100` is a number; Style Settings 1.0.9 drops options
+  // that aren't non-empty strings, and a select without valid options entirely.
+  const SEL = `
+/* @settings
+name: Sel
+id: sel
+settings:
+\t- id: weight
+\t  type: variable-select
+\t  default: '400'
+\t  options:
+\t    - label: Light
+\t      value: 100
+\t    - label: Bold
+\t      value: 700
+\t- id: font
+\t  type: variable-select
+\t  default: a
+\t  options:
+\t    - a
+\t    - b
+*/
+`;
+  test("a select with no valid options doesn't apply", () => {
+    const { sections } = parseStyleSettings(SEL);
+    const { css, unknown } = resolveStyleSettings(sections, {
+      "sel@@weight": 100,
+      "sel@@font": "b",
+    });
+    assert.doesNotMatch(css, /--weight/);
+    assert.match(css, /--font: b;/);
+    assert.deepEqual(unknown, ["sel@@weight"]);
+  });
+});

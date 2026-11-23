@@ -87,13 +87,38 @@ export function parseStyleSettings(css: string): {
 const optionValue = (o: string | { value: string } | undefined) =>
   typeof o === "string" ? o : o?.value;
 
+const nonEmpty = (v: unknown): v is string =>
+  typeof v === "string" && v.trim() !== "";
+
+/** Option values as the plugin normalises them; malformed options are left out. */
+function validOptions(options: StyleSettingDef["options"]): string[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((o) =>
+    nonEmpty(o)
+      ? [o]
+      : o && typeof o === "object" && nonEmpty(o.label) && nonEmpty(o.value)
+        ? [o.value]
+        : [],
+  );
+}
+
 export function resolveStyleSettings(
   sections: StyleSettingsSection[],
   user: StyleSettingsExport = {},
 ): ResolvedStyleSettings {
   const config: Record<string, Record<string, StyleSettingDef>> = {};
   for (const s of sections)
-    for (const st of s.settings) if (st?.id) (config[s.id] ??= {})[st.id] = st;
+    for (const st of s.settings) {
+      if (!st?.id) continue;
+      if (st.type === "class-select" || st.type === "variable-select") {
+        // The plugin (1.0.9) only accepts non-empty string options, or objects
+        // with non-empty string label and value; a select without any is
+        // dropped whole (AnuPpuccin's numeric `value: 100` weights).
+        const options = validOptions(st.options);
+        if (!options.length) continue;
+        (config[s.id] ??= {})[st.id] = { ...st, options };
+      } else (config[s.id] ??= {})[st.id] = st;
+    }
   const get = (sec: string, id: string) => user[`${sec}@@${id}`];
 
   // --- classes (initClasses) ---

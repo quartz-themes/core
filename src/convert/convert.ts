@@ -232,6 +232,89 @@ function parseLikeBrowser(css: string, warnings: string[]): Root {
 /** Custom properties that hold an Obsidian icon id. */
 const ICON_PROPS = /^--(callout-icon|checkbox-icon|.*-icon)$/;
 
+/** The main pane's wrappers, around the note (`.mod-root .workspace-tabs`, …). */
+const ROOT_PANE_CLASSES = new Set([
+  "workspace-tabs",
+  "workspace-tab-container",
+  "workspace-leaf",
+  "workspace-leaf-content",
+  "view-content",
+  "markdown-reading-view",
+]);
+const PANE_BACKGROUND = /^background(-color|-image)?$/i;
+
+/**
+ * Themes paint the main pane, behind the note, on its wrappers
+ * (Border: `body.theme-dark .workspace-split.mod-root .workspace-tabs`). Those
+ * wrappers don't exist in Quartz, where the page itself is behind the note: a
+ * copy of the rule's backgrounds goes onto the body part of the selector, at
+ * the same specificity, and the main pass maps it like any body rule.
+ */
+function paneBackgrounds(root: Root): void {
+  const copies: [Rule, string[], Declaration[]][] = [];
+  root.walkRules((rule) => {
+    const parent = rule.parent as AtRule | undefined;
+    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
+    // A transparent pane shows what's painted further out (body, workspace),
+    // which in Quartz is the page itself: nothing to copy.
+    const decls = (rule.nodes ?? []).filter(
+      (n): n is Declaration =>
+        n.type === "decl" &&
+        PANE_BACKGROUND.test(n.prop) &&
+        !/^(transparent|none|initial|inherit|unset)\b|rgba\([^)]*,\s*0\)/i.test(
+          n.value.trim(),
+        ),
+    );
+    if (!decls.length) return;
+    const bodies: string[] = [];
+    try {
+      selectorParser((selectors) => {
+        selectors.each((sel) => {
+          const all = splitCompounds(sel);
+          const subject = all[all.length - 1]!;
+          if (!classesOf(subject).some((c) => ROOT_PANE_CLASSES.has(c))) return;
+          if (
+            subject.nodes.some(
+              (n) =>
+                n.type === "pseudo" &&
+                (isPseudoElement(n) || /^:(hover|focus|active)/.test(n.value)),
+            )
+          )
+            return;
+          // The main pane only, not a sidebar or a stacked/popover leaf.
+          if (!all.some((c) => classesOf(c).includes("mod-root"))) return;
+          const first = all[0]!;
+          const bodyish = first.nodes.some(
+            (n) =>
+              (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
+              (n.type === "class" && /^theme-(dark|light)$/.test(n.value)),
+          );
+          const spec = specificity(sel);
+          const head =
+            bodyish && all.length > 1
+              ? first.nodes.map(String).join("").trim()
+              : "body";
+          const own =
+            bodyish && all.length > 1
+              ? specificity({ nodes: first.nodes } as unknown as SSelector)
+              : ([0, 0, 1] as Spec);
+          const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
+          const padded = `${head}${pad(rest).map(String).join("")}`;
+          bodies.push(padded);
+        });
+      }).processSync(rule.selector);
+    } catch {
+      return;
+    }
+    if (bodies.length) copies.push([rule, bodies, decls]);
+  });
+  for (const [rule, bodies, decls] of copies) {
+    const copy = postcss.rule({ selector: [...new Set(bodies)].join(", ") });
+    for (const d of decls) copy.append(d.clone());
+    rule.before(copy);
+  }
+}
+
 export function convertObsidianCss(
   css: string,
   opts: ConvertOptions = {},
@@ -276,6 +359,8 @@ export function convertObsidianCss(
   root.walkComments((c) => {
     c.remove();
   });
+
+  paneBackgrounds(root);
 
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
@@ -1020,10 +1105,17 @@ function processSelector(
       } else if (n.type === "universal") n.remove();
     }
     const { nodes, before } = splitCompounds(sel)[i]!;
+    // `.markdown-preview-view`, or `:is(.markdown-preview-view, .markdown-rendered)`.
+    const isRootName = (n: SNode): boolean =>
+      (n.type === "class" && CONTENT_ROOT_CLASSES.includes(n.value)) ||
+      (n.type === "pseudo" &&
+        [":is", ":where", ":matches"].includes(n.value) &&
+        (n as selectorParser.Pseudo).nodes.length > 0 &&
+        (n as selectorParser.Pseudo).nodes.every(
+          (alt) => alt.nodes.length === 1 && isRootName(alt.nodes[0]!),
+        ));
     const prevIsRoot =
-      current[i - 1]?.nodes.some(
-        (n) => n.type === "class" && CONTENT_ROOT_CLASSES.includes(n.value),
-      ) && isDescendantOrChild(before);
+      current[i - 1]?.nodes.some(isRootName) && isDescendantOrChild(before);
     if (prevIsRoot) before!.remove();
     else if (nodes[0])
       nodes[0].parent!.insertBefore(
