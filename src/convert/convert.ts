@@ -644,6 +644,49 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
   return changed;
 }
 
+/**
+ * `.markdown-preview-pusher` is an empty element Obsidian puts before a note's
+ * first block, so `.markdown-preview-pusher + div` is the first block. Quartz
+ * has no pusher: `pusher + X` → `X:first-child` (a pseudo-class for a class, same
+ * specificity), `pusher ~ X` → `X`, padded. As a plain wrapper it would match
+ * any element and turn "the first block" into "every block after another".
+ */
+function rewritePusher(sel: SSelector): boolean {
+  let changed = false;
+  const all = splitCompounds(sel);
+  for (let i = all.length - 2; i >= 0; i--) {
+    const pusher = all[i]!;
+    const next = all[i + 1]!;
+    const comb = next.before?.value.trim();
+    if (comb !== "+" && comb !== "~") continue;
+    if (!classesOf(pusher).includes("markdown-preview-pusher")) continue;
+    // Only a bare pusher compound (`.markdown-preview-pusher`, `div.…`).
+    if (
+      !pusher.nodes.every(
+        (n) =>
+          (n.type === "class" && n.value === "markdown-preview-pusher") ||
+          (n.type === "tag" && n.value.toLowerCase() === "div"),
+      )
+    )
+      continue;
+    const spec = specificity(pusher as unknown as SSelector);
+    for (const n of pusher.nodes) n.remove();
+    next.before!.remove();
+    const add =
+      comb === "+"
+        ? [...nodesOf(":first-child"), ...pad([spec[0], spec[1] - 1, spec[2]])]
+        : pad(spec);
+    const anchor = next.nodes.find(isPseudoElement) ?? undefined;
+    const last = next.nodes[next.nodes.length - 1]!;
+    for (const q of add.reverse()) {
+      if (anchor) anchor.parent!.insertBefore(anchor, q);
+      else last.parent!.insertAfter(last, q);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
 /** The reading view and its wrappers, which hold Obsidian's properties block. */
 const READING_VIEW_CLASSES = new Set([
   "markdown-preview-view",
@@ -772,7 +815,8 @@ function processSelector(
   ctx: Ctx,
   top = false,
 ): SelectorResult {
-  const properties = rewriteProperties(sel);
+  const pusher = rewritePusher(sel);
+  const properties = rewriteProperties(sel) || pusher;
   const explorer = rewriteExplorer(sel);
   if (explorer === "drop") return { drop: "staticFalse" };
   const compounds = splitCompounds(sel);

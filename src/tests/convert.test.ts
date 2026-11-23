@@ -121,6 +121,17 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("the block after Obsidian's pusher is the note's first block", () => {
+    // Obsidian: only the first block loses its top margin. Not every block's
+    // first child (Quartz's table inside .table-container).
+    const out = conv(
+      ".markdown-rendered > .markdown-preview-section > .markdown-preview-pusher + div:not(.mod-ui) > :first-child { margin-top: 0 }",
+    );
+    assert.match(out, /:first-child/);
+    assert.doesNotMatch(out, /\+/);
+    assert.doesNotMatch(out, /pusher/);
+  });
+
   test("properties rules scoped to the reading view reach Quartz's properties block", () => {
     // Quartz renders properties above the note, outside .markdown-preview-view.
     assert.equal(
