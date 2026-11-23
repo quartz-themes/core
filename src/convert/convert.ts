@@ -642,6 +642,47 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
  * everyone's. Split it into `:is(A), :is(B)` (each keeping its own
  * specificity), so each alternative is guarded on its own.
  */
+/** Selectors Level 4 specificity of a complex selector. */
+function specificity(sel: SSelector | SNode): Spec {
+  const spec: Spec = [0, 0, 0];
+  const add = (s: Spec) => {
+    spec[0] += s[0];
+    spec[1] += s[1];
+    spec[2] += s[2];
+  };
+  const max = (list: SNode[]): Spec =>
+    list
+      .map((s) => specificity(s))
+      .reduce(
+        (a, b) =>
+          a[0] !== b[0]
+            ? a[0] > b[0]
+              ? a
+              : b
+            : a[1] !== b[1]
+              ? a[1] > b[1]
+                ? a
+                : b
+              : a[2] >= b[2]
+                ? a
+                : b,
+        [0, 0, 0] as Spec,
+      );
+  for (const n of (sel as selectorParser.Container).nodes ?? []) {
+    if (n.type === "id") add([1, 0, 0]);
+    else if (n.type === "class" || n.type === "attribute") add([0, 1, 0]);
+    else if (n.type === "tag") add([0, 0, 1]);
+    else if (n.type === "pseudo") {
+      if (n.value.startsWith("::")) add([0, 0, 1]);
+      else if (n.value === ":where") continue;
+      else if ([":is", ":not", ":has", ":matches"].includes(n.value))
+        add(max(n.nodes as SNode[]));
+      else add([0, 1, 0]);
+    }
+  }
+  return spec;
+}
+
 function splitMixedIs(selectors: selectorParser.Root, ctx: Ctx): boolean {
   let split = false;
   for (const sel of [...selectors.nodes]) {
@@ -657,11 +698,24 @@ function splitMixedIs(selectors: selectorParser.Root, ctx: Ctx): boolean {
         !!processSelector(inner.clone() as SSelector, ctx, true).structural,
     );
     if (structural.every(Boolean) || !structural.some(Boolean)) continue;
-    for (const inner of only.nodes)
-      selectors.insertBefore(
-        sel,
-        selectorParser().astSync(`:is(${inner.toString().trim()})`).first,
-      );
+    // `:is()` has its most specific alternative's specificity. Each part keeps
+    // it through an alternative that never matches (`:is(body, .qt-0)` matches
+    // body at class specificity, as `:is(body, .x)` did).
+    const [a, b, c] = specificity(sel);
+    const never = [
+      ...Array<string>(a).fill("#qt-0"),
+      ...Array<string>(b).fill(".qt-0"),
+      ...Array<string>(c).fill("qt-0"),
+    ].join(" ");
+    for (const inner of only.nodes) {
+      const own = specificity(inner as SSelector);
+      const same = own[0] === a && own[1] === b && own[2] === c;
+      const text = inner.toString().trim();
+      const part = selectorParser().astSync(
+        same || !never ? `:is(${text})` : `:is(${text}, ${never})`,
+      ).first as SSelector;
+      selectors.insertBefore(sel, part);
+    }
     sel.remove();
     split = true;
   }
@@ -1104,6 +1158,13 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
   let allStructural = true;
   let allContentRoot = true;
   for (const inner of [...node.nodes]) {
+    // A never-matching specificity placeholder (see splitMixedIs).
+    if (
+      /^(#qt-0|\.qt-0|qt-0)( (#qt-0|\.qt-0|qt-0))*$/.test(
+        inner.toString().trim(),
+      )
+    )
+      continue;
     const res = processSelector(inner, ctx);
     if (res.drop) {
       inner.remove();

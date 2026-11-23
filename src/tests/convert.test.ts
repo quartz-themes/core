@@ -405,6 +405,11 @@ describe("selector rewriting", () => {
       ),
       ":is(.search-result-container) { container-type: size; color: red } :is(.nav-files-container) { color: red }",
     );
+    // Each part keeps the whole :is()'s specificity (Bog Oak's accent).
+    assert.equal(
+      conv(":is(body, .some-toggle) { overflow: hidden; --x: 1 }"),
+      ":is(.some-toggle) { overflow: hidden; --x: 1 } :is(body, .qt-0) { --x: 1 }",
+    );
     assert.equal(
       conv(".nav-files-container { container: x / inline-size }"),
       ".nav-files-container { container: x / inline-size }",
