@@ -26,6 +26,12 @@
 - The phone explorer opens again with themes that set `will-change`, `transform` or `filter`
   on the file list (Book and Quill, Bamboo China): those properties made the list the
   containing block of Quartz's fixed overlay.
+- Code blocks use the theme's syntax colours (`--code-keyword`, `--code-string`, …) instead
+  of Shiki's palette, through the `data-token-type` attributes Quartz's syntax-highlighting
+  plugin adds. Theme rules on code still take precedence.
+- Checked checkboxes show Obsidian's checkmark (and themes' custom ones) instead of Quartz's:
+  rules on bare elements with a single-colon pseudo-element (`input:checked:after`) were
+  scoped into an invalid selector and dropped.
 
 ## 3.1.1
 

@@ -67,6 +67,34 @@ export const CALLOUT_ICON_CSS = `:where(.callout-icon) {
 `;
 
 /**
+ * Code blocks: Obsidian colours tokens with the theme's `--code-*` variables;
+ * Quartz highlights with Shiki, whose palette would win. Quartz's
+ * syntax-highlighting plugin tags each token span with `data-token-type`,
+ * named after those variables. Zero specificity, first in the obsidian layer:
+ * themes' own code rules still win.
+ */
+const CODE_TOKEN_VARS: Record<string, string> = {
+  normal: "normal",
+  comment: "comment",
+  string: "string",
+  regexp: "important",
+  keyword: "keyword",
+  operator: "operator",
+  value: "value",
+  important: "important",
+  property: "property",
+  function: "function",
+  tag: "tag",
+  punctuation: "punctuation",
+};
+export const CODE_TOKEN_CSS = Object.entries(CODE_TOKEN_VARS)
+  .map(
+    ([type, v]) =>
+      `:where(.markdown-rendered pre) :where(span[data-token-type="${type}"]) { color: var(--code-${v}); }`,
+  )
+  .join("\n");
+
+/**
  * Quartz (5.1+) defines Obsidian's variables on :root from its own colours
  * (`--text-highlight-bg: var(--textHighlight)`, …) so Obsidian-styled plugins
  * look right without a theme. With a theme those definitions leak: Obsidian's
@@ -216,6 +244,7 @@ export function composeStylesheet({
     "@layer obsidian {",
     reset && CONTENT_RESET,
     CALLOUT_ICON_CSS,
+    CODE_TOKEN_CSS,
     resetCss(),
     bridgeCss(quartzFonts),
     app,

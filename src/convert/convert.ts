@@ -114,6 +114,15 @@ function nodesOf(str: string): SNode[] {
   return root.first.nodes.map((n) => n.clone() as SNode);
 }
 
+/** `::before`, and the single-colon forms CSS2 allowed (`:before`, `:after`…). */
+function isPseudoElement(n: SNode): boolean {
+  return (
+    n.type === "pseudo" &&
+    (n.value.startsWith("::") ||
+      /^:(before|after|first-line|first-letter)$/i.test(n.value))
+  );
+}
+
 /** Nodes that match any element and add the given specificity. */
 function pad([a, b, c]: Spec): SNode[] {
   const parts: string[] = [];
@@ -673,7 +682,7 @@ function specificity(sel: SSelector | SNode): Spec {
     else if (n.type === "class" || n.type === "attribute") add([0, 1, 0]);
     else if (n.type === "tag") add([0, 0, 1]);
     else if (n.type === "pseudo") {
-      if (n.value.startsWith("::")) add([0, 0, 1]);
+      if (isPseudoElement(n)) add([0, 0, 1]);
       else if (n.value === ":where") continue;
       else if ([":is", ":not", ":has", ":matches"].includes(n.value))
         add(max(n.nodes as SNode[]));
@@ -867,9 +876,8 @@ function processSelector(
     if (control && !subject.named && !ancestorsNamed) {
       if (control === "drop") return { drop: "appOnly" };
       const last = splitCompounds(sel).at(-1)!.nodes;
-      const pseudoEl = last.find(
-        (n) => n.type === "pseudo" && n.value.startsWith("::"),
-      );
+      // Before a trailing pseudo-element: `input:after:where(…)` is invalid.
+      const pseudoEl = last.find(isPseudoElement);
       const q = nodesOf(":where(.markdown-rendered *)")[0]!;
       if (pseudoEl) pseudoEl.parent!.insertBefore(pseudoEl, q);
       else if (last.length)
@@ -1069,9 +1077,7 @@ function processCompound(
         if (rw?.qualify) {
           const last = nodes[nodes.length - 1]!;
           // Insert before a trailing pseudo-element, else at the end.
-          const anchor = nodes.find(
-            (n) => n.type === "pseudo" && n.value.startsWith("::"),
-          );
+          const anchor = nodes.find(isPseudoElement);
           for (const q of nodesOf(rw.qualify)) {
             if (anchor) anchor.parent!.insertBefore(anchor, q);
             else last.parent!.insertAfter(last, q);

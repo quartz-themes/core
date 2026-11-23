@@ -113,6 +113,12 @@ describe("selector rewriting", () => {
       conv("input[type=checkbox]::after { color: red }"),
       "input[type=checkbox]:where(.markdown-rendered *)::after { color: red }",
     );
+    // Single-colon pseudo-elements too: `:checked:after:where(…)` is invalid
+    // and dropped the rule (Obsidian's checkmark).
+    assert.equal(
+      conv("input[type=checkbox]:checked:after { content: '' }"),
+      "input[type=checkbox]:checked:where(.markdown-rendered *):after { content: '' }",
+    );
   });
 
   test("bare list and link rules style notes, not Quartz's explorer or table of contents", () => {
@@ -489,6 +495,18 @@ describe("compose", () => {
     });
     assert.ok(main.startsWith(url), main.slice(0, 120));
     assert.match(main, /@layer obsidian \{[\s\S]*body \{ color: red \}/);
+  });
+
+  test("code tokens take the theme's --code-* colours, below theme rules", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /@layer obsidian \{[\s\S]*:where\(\.markdown-rendered pre\) :where\(span\[data-token-type="keyword"\]\) \{ color: var\(--code-keyword\); \}/,
+    );
+    assert.match(
+      main,
+      /data-token-type="regexp"\]\) \{ color: var\(--code-important\)/,
+    );
   });
 
   test("explorer rows keep Obsidian's inline indentation, collapsed children are gone", () => {
