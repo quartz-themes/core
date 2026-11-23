@@ -56,6 +56,13 @@ export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h
 export const PROPERTIES_RESET = `:where(.metadata-container, .metadata-container :not(svg, svg *)) {
   all: revert;
 }
+/* Obsidian's block sits in the reading view and inherits its text font; Quartz's
+   sits above the note. */
+:where(.metadata-container) {
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+}
 :where(.metadata-container > summary) {
   list-style: none;
 }

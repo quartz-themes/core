@@ -34,7 +34,8 @@
   scoped into an invalid selector and dropped.
 - Properties rules scoped to the reading view (`.markdown-preview-view .metadata-container`, in
   71 themes and Obsidian's own CSS) apply to Quartz's properties block, which sits above the note
-  rather than inside it, and the block starts from browser defaults, like note content, so
+  rather than inside it, and the block starts from browser defaults and the note's text font, like
+  note content, so
   Quartz's own properties styles don't show through; property pills (`.multi-select-pill`) are
   styled instead of dropped as app UI. With note-properties' Obsidian markup,
   themes style properties as in Obsidian.
