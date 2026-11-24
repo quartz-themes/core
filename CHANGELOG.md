@@ -41,8 +41,9 @@
   themes style properties as in Obsidian.
 - Rules for Obsidian's block wrappers (`.el-p`, `.el-table`, `.el-pre`, `.el-h1`…, in ~100 themes
   and Obsidian's own CSS) apply to the blocks Quartz renders: `div.el-p > p` is the paragraph,
-  `.el-table` Quartz's `.table-container`, `.el-pre` the code block. Headings after tables and code
-  blocks get Obsidian's spacing again.
+  `.el-table` Quartz's `.table-container`, `.el-pre` the code block, `.el-hr hr` the note's rules
+  (Willemstad) but not the footnotes'. Headings after tables and code blocks get Obsidian's
+  spacing again.
 - What a theme paints behind the note paints Quartz's page, composited as in Obsidian. Obsidian
   stacks several boxes there (the reading view, `.view-content`, the leaf, the tabs, the main
   split, `.workspace`, `.horizontal-main-container`, `.app-container`, `body`); the innermost

@@ -355,7 +355,13 @@ describe("selector rewriting", () => {
     // The wrapper and its element: the element, with the wrapper's specificity.
     assert.equal(
       conv("div.el-p > p { margin: 0 }"),
-      "p:not(qt-0):not(.qt-0) { margin: 0 }",
+      "p:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin: 0 }",
+    );
+    // Also as a descendant (Willemstad), and only the note's own blocks: the
+    // footnotes' hr has no wrapper.
+    assert.equal(
+      conv(".el-hr hr { margin: 0 }"),
+      "hr:where(.markdown-preview-view > *):not(.qt-0) { margin: 0 }",
     );
     // "A heading after a table": Quartz's table block is .table-container,
     // and the heading's own wrapper goes.

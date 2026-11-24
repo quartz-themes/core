@@ -1043,12 +1043,14 @@ function rewriteBlockWrappers(sel: SSelector): boolean {
       ?.value.toLowerCase();
     if (
       next &&
-      isChild(next.before) &&
+      (isChild(next.before) ||
+        (isDescendantOrChild(next.before) && found.names[0] !== "el-div")) &&
       found.names.length === 1 &&
       nextTag &&
       naturals.includes(nextTag)
     ) {
-      // `div.el-p > p` → `p`: the wrapper's specificity and pseudos move onto it.
+      // `div.el-p > p` → `p`: the wrapper's specificity and pseudos move onto
+      // it. Also `.el-hr hr` (Willemstad): the block is the wrapper's child.
       const target = next.nodes[next.nodes.length - 1]!;
       const anchor = next.nodes.find(isPseudoElement);
       for (const n of [...pad(spec), ...others]) {
@@ -1056,6 +1058,12 @@ function rewriteBlockWrappers(sel: SSelector): boolean {
         if (anchor) anchor.parent!.insertBefore(anchor, n);
         else target.parent!.insertAfter(target, n);
       }
+      // Only the note's own block, as only those have a wrapper (not the
+      // footnotes' hr, a callout's p).
+      if (BLOCK_WRAPPERS[found.names[0]!]!.block === nextTag)
+        for (const q of nodesOf(":where(.markdown-preview-view > *)"))
+          if (anchor) anchor.parent!.insertBefore(anchor, q);
+          else target.parent!.insertAfter(target, q);
       for (const n of found.nodes) n.remove();
       next.before!.remove();
       changed = true;
