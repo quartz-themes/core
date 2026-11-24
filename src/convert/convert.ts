@@ -55,6 +55,7 @@ import {
   CONTENT_ROOT_CLASSES,
   BARE_TAGS,
   LANGUAGE_CLASS_PREFIX,
+  PRISM_TOKENS,
   QUARTZ_LAYOUT_PREFIXES,
   FILES_CONTAINER,
   TREE_ITEM_CLASSES,
@@ -1811,6 +1812,17 @@ function processCompound(
           // `.language-js` → `[data-language="js"]` (same specificity).
           const lang = v.slice(LANGUAGE_CLASS_PREFIX.length);
           replace(node, nodesOf(`[data-language="${lang}"]`));
+          concrete = named = true;
+        } else if (v === "token") {
+          // Prism's `.token.number` → Quartz's `[data-token-type="value"]`.
+          replace(node, nodesOf("[data-token-type]"));
+          concrete = named = true;
+        } else if (hasClass("token") && v in PRISM_TOKENS) {
+          replace(node, nodesOf(`[data-token-type="${PRISM_TOKENS[v]}"]`));
+          concrete = named = true;
+        } else if (hasClass("token")) {
+          // A Prism token kind Quartz doesn't mark (`.token.parameter`).
+          replace(node, nodesOf(`[data-token-type="prism-${v}"]`));
           concrete = named = true;
         } else if (isAppOnly(v)) {
           return { drop: "appOnly" };

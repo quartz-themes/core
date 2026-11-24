@@ -243,6 +243,27 @@ export const TAG_REWRITES: Record<
 export const LANGUAGE_CLASS_PREFIX = "language-";
 
 /**
+ * Prism's token classes (Obsidian's highlighter: `.token.number`) → the
+ * `data-token-type` Quartz's syntax highlighting gives the same tokens, by
+ * the `--code-*` variable Obsidian's app.css colours each with. Only the
+ * class each type is named for: finer ones (`atrule`, `class-name`, `char`)
+ * are tokens Quartz files under a broader type, and themes colour them apart.
+ */
+export const PRISM_TOKENS: Record<string, string> = {
+  comment: "comment",
+  string: "string",
+  regex: "regexp",
+  keyword: "keyword",
+  important: "important",
+  operator: "operator",
+  number: "value",
+  property: "property",
+  function: "function",
+  tag: "tag",
+  punctuation: "punctuation",
+};
+
+/**
  * Body classes of Obsidian in reading view on desktop. true = present,
  * false = absent. Classes not listed and not declared by Style Settings are
  * treated as unknown (kept verbatim).

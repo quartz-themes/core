@@ -393,6 +393,25 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("Prism's token classes are Quartz's token types", () => {
+    assert.equal(
+      conv(".token.number { color: red }"),
+      '[data-token-type][data-token-type="value"] { color: red }',
+    );
+    // Prism's finer classes are tokens Quartz lumps in with a broader type:
+    // a theme's colour for them (Desert's `.token.atrule`) is not its keywords'.
+    assert.match(
+      conv(".token.atrule { color: red }"),
+      /data-token-type="prism-atrule"/,
+    );
+    assert.match(
+      conv(".language-css .token.string { color: red }"),
+      /\[data-language="css"\] \[data-token-type\]\[data-token-type="string"\]/,
+    );
+    // Not Quartz's own tags.
+    assert.match(conv(".tag { color: red }"), /^\.tag/);
+  });
+
   test("inline headings stack, each alone in its block as in Obsidian", () => {
     assert.match(
       conv(".markdown-rendered h1 { display: inline }"),

@@ -218,8 +218,11 @@ export function bridgeCss(quartzFonts = false): string {
     ([k]) => !quartzFonts || !FONT_BRIDGE_KEYS.has(k),
   );
   const decls = entries.map(([k, v]) => `  ${k}: ${v};`).join("\n");
-  // :where() keeps specificity at 0 so any theme rule can override it.
-  return `:where(body) {\n${decls}\n}\n`;
+  // :where() keeps specificity at 0 so any theme rule can override it. Again
+  // on the page and the main column, which carry the variables of the boxes
+  // around Obsidian's sidebars and note: Quartz's chrome follows them there,
+  // as Obsidian's sidebars do (Monokai's page title).
+  return `:where(body, #quartz-root, .center) {\n${decls}\n}\n`;
 }
 
 /**

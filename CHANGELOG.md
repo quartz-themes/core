@@ -28,7 +28,8 @@
   containing block of Quartz's fixed overlay.
 - Code blocks use the theme's syntax colours (`--code-keyword`, `--code-string`, …) instead
   of Shiki's palette, through the `data-token-type` attributes Quartz's syntax-highlighting
-  plugin adds. Theme rules on code still take precedence.
+  plugin adds. Theme rules on code still take precedence. Theme rules for Obsidian's highlighter tokens
+  (`.token.number`, `.token.operator`, in ~180 themes) colour the same tokens in Quartz.
 - Checked checkboxes show Obsidian's checkmark (and themes' custom ones) instead of Quartz's:
   rules on bare elements with a single-colon pseudo-element (`input:checked:after`) were
   scoped into an invalid selector and dropped.
@@ -68,7 +69,8 @@
   split, the leaf, `.view-content`, in 136 themes) apply: in Obsidian they inherit into the note
   and the boxes' backgrounds (Fantasy's translucent panes), and were dropped with the boxes. They
   go on Quartz's page or main column, which stand for those boxes, so variables `<body>` builds
-  from them keep `<body>`'s values as in Obsidian (Kiwi Mono's checkboxes). Ones
+  from them keep `<body>`'s values as in Obsidian (Kiwi Mono's checkboxes), while Quartz's
+  sidebars and title follow them, as Obsidian's sidebars do. Ones
   gated on the box's own `:has()` stay out, as that condition can't be checked on the page. A
   pane rule's body classes keep working when the selector list put a line break before them
   (Micro Mike's gradient panes).
