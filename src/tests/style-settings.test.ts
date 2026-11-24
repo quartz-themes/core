@@ -93,6 +93,31 @@ describe("resolve", () => {
     assert.equal(css, "", "defaults live in the theme CSS; nothing is emitted");
   });
 
+  test("the first setting with an id wins, as in the plugin", () => {
+    // Baseline: a heading and a class-select share `colorful-headings`.
+    const { bodyClasses } = resolveStyleSettings(
+      [
+        {
+          id: "s",
+          name: "S",
+          settings: [
+            { id: "dup", title: "Heading", type: "heading", level: 3 },
+            {
+              id: "dup",
+              title: "Select",
+              type: "class-select",
+              default: "dup-off",
+              options: ["dup-off", "dup-side"],
+            },
+          ],
+        },
+      ] as never,
+      { "s@@dup": "dup-side" },
+    );
+    assert.equal(bodyClasses["dup-side"], undefined);
+    assert.equal(bodyClasses["dup-off"], undefined);
+  });
+
   test("user values override classes and emit the plugin's CSS", () => {
     const { bodyClasses, css, unknown } = resolveStyleSettings(sections, {
       "demo@@toggle-on": false,

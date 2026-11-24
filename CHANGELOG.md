@@ -101,6 +101,49 @@
 - Style Settings with an id that isn't a valid CSS variable name (Minimal's
   `cards-background-hover (hover)`) no longer cost every other colour setting: the invalid
   declaration is left out, as browsers do, instead of the whole block being rejected and lost.
+- Variables Quartz itself defines on `:root` (`--font-text`, `--background-primary` and ~50
+  others) are unset there, as in Obsidian, which defines them on `<body>`: a theme's
+  `:root { --x: var(--font-text, -apple-system) }` took Quartz's font instead of its fallback
+  (Elementra).
+- Text styles a theme sets on the boxes around the note (`.markdown-reading-view {
+letter-spacing }`) reach the note, as they inherit into it in Obsidian (Prose).
+- Universal rules (`* { font-family: "JetBrains Mono" }`) reach what blocks inherit, as through
+  Obsidian's block wrappers: headings, whose app.css font is `inherit`, took the note's font
+  instead (SpectrumPlus).
+- The box of Obsidian's block wrappers (`.markdown-preview-section > div`, `.el-hr`,
+  `[class^="el-"]`) goes around the block rather than inside it: their padding is margin on the
+  block (Discordian's callouts and code blocks were padded 4rem inside, Hidontknow's blocks had
+  no space between them), within what the padding leaves of the column, and their zero or
+  `auto` margins no longer cancel the block's own; between neighbouring wrappers they leave
+  those blocks out of the theme's wrapper margins (Adrenaline's and Brainhack's stacked
+  headings), still with their own margins. Their `em`s are the
+  note's text size, not the block's. Their background and corners stay behind the block: the
+  callouts and code blocks Obsidian paints keep their own (Office Mock).
+- A `div` typed onto one of Obsidian's boxes (`.view-content > div:is(.markdown-reading-view) >
+div`) is that box, not any div: ITS Theme's container rule sized every nested div of the page,
+  and its header buttons ran off a phone's screen.
+- Rules that reach a block through the wrapper (`.markdown-preview-section :not(:is(li, ul,
+ol)) > h2`) match top-level blocks too (Micro Mike's heading margins).
+- A column flexbox on the note is kept: the blocks still stack, and their margins don't
+  collapse, as in Obsidian (DarkEmber, Micro Mike).
+- Rules with an ancestor `:is()` of Obsidian's boxes (`:is(.markdown-reading-view,
+.markdown-source-view) .markdown-preview-sizer`) are no longer dropped.
+- Bare headings and rules behind `:is()` (`.cm-header-1, h1 { &:before {…} }`) stay in the note,
+  like other bare headings: Lancer's heading ornaments drew on Quartz's titles. So do bare `hr`
+  rules: Quartz's rule above the footer took a theme's margins, past the screen's edge (Weave
+  Surface, PLN).
+- Quartz's sidebars are open docks: rules for a collapsed one
+  (`.workspace:not(.is-right-sidedock-open) > .mod-right-split`) no longer apply (Neumorphism's
+  negative margins pushed the sidebars off-screen).
+- A theme's `position: absolute` on the reading view's sizer no longer takes the note out of
+  Quartz's column (Elysian's note covered the right sidebar and ran off the screen).
+- The page never scrolls sideways: what a theme hangs past the window's edge is cut off, as in
+  Obsidian's window (Lancer, Bureau).
+- The properties block sits on the note's background colour, as inside the note in Obsidian
+  (Blue Topaz).
+- Style Settings with an id used twice in a section resolve as the plugin resolves them: the
+  first one counts. Baseline's "Colorful headings" heading shadows the heading indicator after
+  it, which no longer shows (~30 themes repeat ids).
 - Tables keep the space above them: Obsidian's "no top margin for the note's first block" rule
   (`.markdown-preview-pusher + div > :first-child`) applied to the first child of every block,
   including the table inside Quartz's `.table-container`.

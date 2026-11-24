@@ -87,7 +87,7 @@ describe("selector rewriting", () => {
     assert.equal(conv(".view-content > div { color: red }"), "");
     assert.equal(
       conv(".workspace > .workspace-split.mod-root hr { color: red }"),
-      ":not(.qt-0)>:not(.qt-0):not(.qt-0) hr { color: red }",
+      ":not(.qt-0)>:not(.qt-0):not(.qt-0) hr:where(.markdown-rendered *) { color: red }",
     );
     assert.equal(
       conv(".markdown-reading-view > .markdown-preview-view { color: red }"),
@@ -393,6 +393,20 @@ describe("selector rewriting", () => {
     );
   });
 
+  test("Quartz's sidebars are open docks", () => {
+    // Neumorphism: a collapsed dock's negative margins pushed the sidebar off-screen.
+    assert.equal(
+      conv(
+        "body:not(.is-mobile) .workspace:not(.is-right-sidedock-open) > .workspace-split.mod-right-split { margin-inline: -4px }",
+      ),
+      "",
+    );
+    assert.match(
+      conv(".workspace.is-left-sidedock-open .mod-left-split { color: red }"),
+      /\.left\.sidebar/,
+    );
+  });
+
   test("Prism's token classes are Quartz's token types", () => {
     assert.equal(
       conv(".token.number { color: red }"),
@@ -517,6 +531,11 @@ describe("selector rewriting", () => {
       conv("a { color: var(--link-color) }"),
       "a:where(.markdown-rendered *) { color: var(--link-color) }",
     );
+    // Quartz's rule above the footer is outside the note (Weave Surface's margins).
+    assert.equal(
+      conv("hr { margin: 0 1.5em }"),
+      "hr:where(.markdown-rendered *) { margin: 0 1.5em }",
+    );
     // Named ancestors are specific enough already.
     assert.equal(
       conv(".callout ul { margin: 0 }"),
@@ -567,10 +586,18 @@ describe("selector rewriting", () => {
       ),
       "",
     );
+    // As an ancestor, a typed wrapper is no more than the wrapper (ITS).
+    assert.equal(
+      conv(
+        ".view-content > div:is(.markdown-source-view, .markdown-reading-view) > div { container: note/inline-size }",
+      ),
+      "",
+    );
+    assert.equal(conv("div.markdown-reading-view > div { color: red }"), "");
     // The block wrapper's siblings are block wrappers too.
     assert.equal(
-      conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 0 }"),
-      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: 0 }",
+      conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 1em }"),
+      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: calc(1 * var(--font-text-size)) }",
     );
   });
 
@@ -668,6 +695,114 @@ describe("selector rewriting", () => {
         ".markdown-preview-view { min-width: 80ch; max-width: 50%; color: red }",
       ),
       ".markdown-preview-view { max-width: 50%; color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
+    );
+  });
+
+  test("bare headings behind :is() stay in the note", () => {
+    // Lancer: `.cm-header-1, h1 { &:before {…} }` drew on Quartz's titles.
+    assert.equal(
+      conv(".cm-header-1, h1 { &:before { content: '' } }"),
+      ":where(h1):not(.qt-0):where(.markdown-rendered *):before { content: '' }",
+    );
+  });
+
+  test("the block wrapper can be the element between the note and a block", () => {
+    // Micro Mike: `:not(:is(li, ul, ol))` is the wrapper for top-level blocks.
+    assert.equal(
+      conv(
+        ".markdown-preview-section :not(:is(li, ul, ol)) > h2 { margin-top: 20px }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0) :not(:is(li,ul,ol))>h2,:where(.markdown-preview-view):not(.qt-0):not(qt-0)>h2 { margin-top: 20px }",
+    );
+    // A named element in between isn't the wrapper.
+    assert.equal(
+      conv(".markdown-rendered .callout > p { color: red }"),
+      ".markdown-rendered .callout > p { color: red }",
+    );
+  });
+
+  test("wrappers in an ancestor's :is() are any ancestor", () => {
+    // Micro Mike's column sizer was dropped along with the editor's alternative.
+    assert.equal(
+      conv(
+        ":is(.markdown-reading-view, .markdown-source-view) p { color: red }",
+      ),
+      ":is(:not(.qt-0)) p { color: red }",
+    );
+    // Their children still need a name of their own.
+    assert.equal(
+      conv(":is(.workspace-leaf-content, .view-content) > div { color: red }"),
+      "",
+    );
+  });
+
+  test("a column flexbox on the note keeps its margins apart", () => {
+    // DarkEmber: flex items' margins don't collapse.
+    assert.equal(
+      conv(
+        ".markdown-preview-view.is-readable-line-width .markdown-preview-sizer { display: flex; flex-direction: column }",
+      ),
+      ".markdown-preview-view:not(.qt-0):not(.qt-0) { display: flex; flex-direction: column }",
+    );
+  });
+
+  test("universal rules reach the blocks through their wrappers", () => {
+    // SpectrumPlus: headings inherit (`--h2-font: inherit`) the wrapper's font.
+    assert.equal(
+      conv('* { font-family: "JetBrains Mono"; margin: 0 }'),
+      '* { font-family: "JetBrains Mono"; margin: 0 } :where(.markdown-preview-view):not(.qt-0):not(#qt-0) { font-family: "JetBrains Mono" }',
+    );
+    // Not the descendants of anything else.
+    assert.equal(
+      conv(".callout * { color: red }"),
+      ".callout * { color: red }",
+    );
+  });
+
+  test("a block wrapper's box is around the block, not inside it", () => {
+    // Discordian: the wrapper's side padding moves the block in; its zero and
+    // auto margins don't replace the block's own, which collapse through it.
+    assert.equal(
+      conv(
+        ".markdown-preview-section > div { padding-left: 4rem; padding-right: 2rem; margin: 0 auto 0 auto; max-width: 100% }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-left: 4rem; margin-right: 2rem; max-width: min(100%, calc(100% - 4rem - 2rem)) }",
+    );
+    // Its width holds that padding: the block stays within what it leaves.
+    assert.equal(
+      conv(".markdown-preview-section > div { padding: 0 2rem }"),
+      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-right: 2rem; margin-left: 2rem; max-width: calc(100% - 2rem - 2rem) }",
+    );
+    // Adrenaline: wrapper margins' ems are the note's text size; a zero one
+    // between neighbours leaves those blocks out of the wrapper margins.
+    assert.match(
+      conv("div.el-h2 { margin-top: var(--s, 4em) !important }"),
+      /\{ margin-top: var\(--s, calc\(4 \* var\(--font-text-size\)\)\) !important \}$/,
+    );
+    const cancelled = conv(
+      "div.el-h2 { margin-top: 4em !important } div.el-h1 + div.el-h2 { margin-top: 0em !important }",
+    );
+    assert.match(
+      cancelled,
+      /^:where\(h2\)[^{]*:where\(:not\(:where\(h1\)[^{]*\+:where\(h2\)[^{]*\)\) \{ margin-top: calc\(4 \* var\(--font-text-size\)\) !important \}$/,
+    );
+    // Office Mock: its paint is behind the block, its corners its own.
+    assert.match(
+      conv(
+        '.markdown-preview-sizer > [class^="el-"] { background: white; border-radius: 0; color: red }',
+      ),
+      /^:where\([^{]*\):where\(:not\(\.callout, pre, \[data-rehype-pretty-code-figure\]\)\) \{ background: white; border-radius: 0 \} [^{]* \{ color: red \}$/,
+    );
+    // Hidontknow: the space between blocks is the wrappers' top padding.
+    assert.match(
+      conv(
+        '.markdown-preview-sizer > [class^="el-"] ~ [class^="el-"] { padding-top: 28px }',
+      ),
+      /~:where\(p, ul, ol, [^{]*\{ margin-top: 28px \}/,
+    );
+    assert.equal(
+      conv(".el-hr { padding: 12px 0 }"),
+      ":where(hr):not(.qt-0):where(.markdown-rendered *) { margin-top: 12px; margin-bottom: 12px }",
     );
   });
 

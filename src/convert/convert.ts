@@ -56,6 +56,7 @@ import {
   BARE_TAGS,
   LANGUAGE_CLASS_PREFIX,
   PRISM_TOKENS,
+  WORKSPACE_STATE,
   QUARTZ_LAYOUT_PREFIXES,
   FILES_CONTAINER,
   TREE_ITEM_CLASSES,
@@ -298,9 +299,15 @@ function propertiesInherit(root: Root): void {
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
-    const decls = (rule.nodes ?? []).filter(
-      (n): n is Declaration => n.type === "decl" && INHERITED.test(n.prop),
-    );
+    const decls = (rule.nodes ?? []).flatMap((n): Declaration[] => {
+      if (n.type !== "decl") return [];
+      if (INHERITED.test(n.prop)) return [n];
+      // Not inherited, but behind the block in Obsidian, where the block
+      // sits inside the note (Blue Topaz's coloured note under transparent
+      // properties). Just the colour: an image would fit another box.
+      const colour = noteBoxColour(n);
+      return colour ? [colour] : [];
+    });
     if (!decls.length) return;
     const out: string[] = [];
     try {
@@ -360,6 +367,21 @@ function propertiesInherit(root: Root): void {
     for (const d of decls) copy.append(d.clone({ important: false }));
     rule.after(copy);
   });
+}
+
+/** A note box's background colour, as `background-color`. */
+function noteBoxColour(d: Declaration): Declaration | null {
+  if (d.prop === "background-color") return d;
+  if (d.prop !== "background") return null;
+  const v = d.value.trim();
+  // A single colour or variable; layered backgrounds, images and positions
+  // would need the shorthand parsed.
+  if (
+    /[\s,]/.test(v.replace(/\([^()]*\)/g, "()")) ||
+    /url\(|gradient\(/i.test(v)
+  )
+    return null;
+  return d.clone({ prop: "background-color" });
 }
 
 /** One of the note's own boxes, possibly as an `:is()` of them, with states. */
@@ -461,6 +483,73 @@ function wrappedInlineBlocks(root: Root): void {
   });
 }
 
+/** Inherited text properties a universal rule gives Obsidian's block wrappers. */
+const WRAPPER_INHERITED =
+  /^(color|font-family|font-weight|font-style|font-stretch|font-feature-settings|font-variation-settings|font-optical-sizing|font-variant(-[a-z]+)?|letter-spacing|word-spacing|line-height|text-shadow|text-transform|-webkit-font-smoothing|text-rendering)$/;
+
+/**
+ * Obsidian's blocks sit in wrapper divs that only universal rules reach
+ * (`* { font-family: "JetBrains Mono" }`), so what a block inherits, also
+ * through app.css's `--h2-font: inherit`, is the universal rule's value. In
+ * Quartz they sit in the note root, which app.css's `.markdown-preview-view {
+ * font-family: var(--font-text) }` reaches more specifically (SpectrumPlus's
+ * headings). The sizer stands in for the wrappers: it gets a copy of the
+ * universal rule's inherited properties, above the note's own rules (an id),
+ * below any rule for the blocks, which are its children.
+ */
+function universalWrappers(root: Root): void {
+  root.walkRules((rule) => {
+    const parent = rule.parent as AtRule | undefined;
+    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
+    const decls = (rule.nodes ?? []).filter(
+      (n): n is Declaration =>
+        n.type === "decl" && WRAPPER_INHERITED.test(n.prop),
+    );
+    if (!decls.length) return;
+    let sels: string[];
+    try {
+      sels = selectorParser()
+        .astSync(rule.selector)
+        .nodes.flatMap((sel) => {
+          const all = splitCompounds(sel);
+          const subject = all[all.length - 1]!;
+          if (
+            subject.nodes.length !== 1 ||
+            subject.nodes[0]!.type !== "universal" ||
+            // Only <body>/<html> conditions above it: `.callout *` is no wrapper.
+            all.slice(0, -1).some((c) => {
+              const top = c.nodes.some(
+                (n) =>
+                  (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
+                  (n.type === "pseudo" && /^:root$/i.test(n.value)),
+              );
+              return c.nodes.some(
+                (n) =>
+                  !(
+                    (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
+                    (n.type === "pseudo" && /^:(root|not)$/i.test(n.value)) ||
+                    (n.type === "class" && (top || n.value in BODY_STATE))
+                  ),
+              );
+            })
+          )
+            return [];
+          const head = all
+            .slice(0, -1)
+            .map((c) => c.nodes.map(String).join("").trim())
+            .join(" ");
+          return [`${head} .markdown-preview-sizer:not(#qt-0)`.trim()];
+        });
+    } catch {
+      return;
+    }
+    if (!sels.length) return;
+    const copy = postcss.rule({ selector: sels.join(", ") });
+    for (const d of decls) copy.append(d.clone());
+    rule.after(copy);
+  });
+}
+
 /**
  * A selector whose subject has an `:is()` / `:where()` of compounds, once per
  * alternative (`.leaf :is(.view-header, .view-content)` paints `.view-content`).
@@ -502,7 +591,9 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
     const decls = (rule.nodes ?? []).filter(
       (n): n is Declaration =>
         n.type === "decl" &&
-        (BACKGROUND_PROP.test(n.prop) || n.prop.startsWith("--")),
+        (BACKGROUND_PROP.test(n.prop) ||
+          n.prop.startsWith("--") ||
+          BOX_INHERITED.test(n.prop)),
     );
     if (!decls.length) return;
     const byLayer = new Map<number, [string, Spec][]>();
@@ -601,7 +692,7 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
   const painted = backgroundVars(root, [
     ...APP_BOX_BACKGROUNDS,
     ...copies.flatMap(([, , decls]) =>
-      decls.filter((d) => !d.prop.startsWith("--")).map((d) => d.value),
+      decls.filter((d) => BACKGROUND_PROP.test(d.prop)).map((d) => d.value),
     ),
   ]);
   const inside = (heads: [string, Spec][], el: string, ids: number) =>
@@ -613,9 +704,17 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
     for (const [layer, heads] of byLayer) {
       const bg = postcss.rule({ selector: selector(heads) });
       for (const d of decls)
-        if (!d.prop.startsWith("--")) bg.append(...layerDecls(d, layer, split));
+        if (BACKGROUND_PROP.test(d.prop))
+          bg.append(...layerDecls(d, layer, split));
       if (bg.nodes.length) rule.before(bg);
-      const own = decls.filter((d) => d.prop.startsWith("--"));
+      // Text styles set on a box inside the main split inherit into the note
+      // as well (Prose's `.markdown-reading-view { letter-spacing }`), below
+      // any rule for the note's own elements, as inherited values are.
+      const text =
+        layer <= MAIN_COLUMN_LAYER
+          ? decls.filter((d) => BOX_INHERITED.test(d.prop))
+          : [];
+      const own = [...decls.filter((d) => d.prop.startsWith("--")), ...text];
       if (!own.length) continue;
       // Variables set on a box inherit into everything inside it: the note,
       // on the Quartz element that stands for the box (the main column for
@@ -643,6 +742,14 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
       rule.before(onBody);
     }
 }
+
+/**
+ * Inherited text properties a theme sets on the boxes around the note. Not
+ * `font-size` (Obsidian sizes the note itself), nor anything Quartz's chrome
+ * in the main column would shift with.
+ */
+const BOX_INHERITED =
+  /^(color|font-family|font-weight|font-style|letter-spacing|word-spacing|line-height|font-feature-settings|font-variant(-[a-z]+)?|-webkit-font-smoothing|text-rendering)$/;
 
 /** The main split (`.mod-root`) and the boxes inside it: Quartz's `.center`. */
 const MAIN_COLUMN_LAYER = 6;
@@ -775,7 +882,9 @@ export function convertObsidianCss(
   const split = splitBackgroundVars(root);
   paneBackgrounds(root, split);
   propertiesInherit(root);
+  universalWrappers(root);
 
+  const wrapperMargins: WrapperMargins = { cancel: new Map(), decls: [] };
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
@@ -790,6 +899,7 @@ export function convertObsidianCss(
     try {
       out = selectorParser((selectors) => {
         if (splitMixedIs(selectors, { bodyState })) changed = true;
+        if (wrapperAncestors(selectors)) changed = true;
         selectors.each((sel) => {
           stats.selectors.in++;
           const res = processSelector(sel, { bodyState }, true);
@@ -826,7 +936,7 @@ export function convertObsidianCss(
       [structuralSels, (d) => LAYOUT_PROPS.test(d.prop) || isSizeContainer(d)],
       [contentRootSels, isContentRootLayout],
       [mappedRootSels, isMappedRootLayout],
-      [blockWrapperSels, (d) => OVERFLOW_PROPS.test(d.prop)],
+      [blockWrapperSels, isWrapperBox],
     ];
     let parts = [rule];
     for (const [sels, props] of guards)
@@ -836,6 +946,10 @@ export function convertObsidianCss(
           stats.layoutStripped += res.stripped;
           return res.rules;
         });
+    if (blockWrapperSels.length)
+      parts = parts.flatMap((r) =>
+        wrapperPaint(r, blockWrapperSels, wrapperMargins),
+      );
     for (const m of out.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
       const c = m[1]!;
       if (c.startsWith("qt-") || quartzClasses.has(c)) continue;
@@ -844,6 +958,7 @@ export function convertObsidianCss(
     stats.selectors.out += out.split(",").length;
   });
 
+  cancelWrapperMargins(wrapperMargins);
   wrappedInlineBlocks(root);
   bodyBackgrounds(root, split);
 
@@ -927,6 +1042,195 @@ const MARGIN_PROPS =
   /^margin(-(top|right|bottom|left|inline|block)(-(start|end))?)?$/;
 
 /**
+ * The box of Obsidian's per-block wrapper div, on the block itself in Quartz
+ * (`.markdown-preview-section > div`, `.el-hr`): its padding moves the block
+ * in, which on the block is margin (Discordian's `padding-left: 4rem` padded
+ * the inside of callouts and code blocks), also vertically, the space themes
+ * put between blocks with it (Hidontknow's `[class^="el-"] ~ [class^="el-"]
+ * { padding-top }`): exact over the zero block margins such themes use, the
+ * larger of the two rather than their sum otherwise. Its zero or `auto`
+ * margins (`margin: 0 auto`) would replace the block's own, which in Obsidian
+ * collapse through the wrapper: left out.
+ */
+const WRAPPER_PADDING =
+  /^padding(-(top|right|bottom|left|inline|block)(-(start|end))?)?$/;
+/**
+ * Zero margins between neighbouring wrappers stay: they take back the space
+ * the theme's wrapper margins add (Adrenaline's `div.el-h1 + div.el-h2 {
+ * margin-top: 0em }` against `div.el-h2 { margin-top: 4em }`).
+ */
+const isSiblingRule = (d: Declaration) =>
+  /[+~]/.test((d.parent as Rule | undefined)?.selector ?? "");
+const isZeroSiblingMargin = (d: Declaration) =>
+  isSiblingRule(d) && /^0([a-z%]*)?$/i.test(d.value.trim());
+/**
+ * In Obsidian such a zero margin only takes the wrapper's away: the block's
+ * own still collapses through it (Brainhack's headings, its 20px apart;
+ * Adrenaline's, inline, none). On the block itself it would replace the
+ * block's own, so instead the wrapper margins it cancels leave those blocks
+ * out.
+ */
+interface WrapperMargins {
+  cancel: Map<string, string[]>;
+  decls: Declaration[];
+}
+function cancelWrapperMargins({ cancel, decls }: WrapperMargins): void {
+  for (const d of decls) {
+    const sels = cancel.get(d.prop);
+    const rule = d.parent as Rule | undefined;
+    if (!sels?.length || !rule || rule.type !== "rule") continue;
+    const not = `:where(:not(${sels.join(", ")}))`;
+    const selector = selectorParser()
+      .astSync(rule.selector)
+      .nodes.map((s) => {
+        const str = s.toString().trim();
+        return str.includes("::") ? str : `${str}${not}`;
+      })
+      .join(", ");
+    if (rule.nodes.every((n) => n === d || n.type === "comment"))
+      rule.selector = selector;
+    else {
+      rule.after(postcss.rule({ selector, nodes: [d.clone()] }));
+      d.remove();
+    }
+  }
+}
+const isWrapperBox = (d: Declaration) =>
+  OVERFLOW_PROPS.test(d.prop) ||
+  WRAPPER_PADDING.test(d.prop) ||
+  (MARGIN_PROPS.test(d.prop) && !isOffsetMargin(d) && !isSiblingRule(d));
+function wrapperAsBlock(d: Declaration): Declaration[] {
+  if (!WRAPPER_PADDING.test(d.prop)) return [];
+  const side = (prop: string, value: string) =>
+    /^0([a-z%]*)?$/i.test(value.trim()) ? [] : [d.clone({ prop, value })];
+  const which = d.prop.match(/^padding(?:-(.*))?$/)![1];
+  if (which !== undefined && which !== "inline" && which !== "block")
+    return side(`margin-${which}`, d.value);
+  const parts = d.value.trim().split(/\s+/);
+  // One value (`padding: var(--gap)`) is every side; several with functions
+  // in them can't be told apart by whitespace.
+  if (parts.length > 1 && parts.some((x) => x.includes("("))) return [];
+  if (which === "inline" || which === "block")
+    return [
+      ...side(`margin-${which}-start`, parts[0]!),
+      ...side(`margin-${which}-end`, parts[1] ?? parts[0]!),
+    ];
+  // padding: top right bottom left
+  const [top, right = top!, bottom = top!, left = right] = parts;
+  return [
+    ...side("margin-top", top!),
+    ...side("margin-right", right),
+    ...side("margin-bottom", bottom),
+    ...side("margin-left", left),
+  ];
+}
+/**
+ * Its background, and the corners that round it, are behind the block
+ * (Office Mock paints the page on the wrappers, `border-radius: 0`): the
+ * block's own, the theme's and Obsidian's callout and code backgrounds and
+ * corners, stay on top. Without specificity, and not on the blocks Obsidian
+ * itself paints.
+ */
+const WRAPPER_PAINT = (d: Declaration) =>
+  BACKGROUND_PROP.test(d.prop) ||
+  d.prop === "box-shadow" ||
+  /^border(-[a-z]+)*-radius$/.test(d.prop);
+const OWN_PAINT =
+  ":where(:not(.callout, pre, [data-rehype-pretty-code-figure]))";
+function wrapperPaint(
+  rule: Rule,
+  guarded: string[],
+  margins: WrapperMargins,
+): Rule[] {
+  // Its `em`s are the note's text size, not the block's (a heading's).
+  const sels = selectorParser()
+    .astSync(rule.selector)
+    .nodes.map((s) => s.toString().trim());
+  if (sels.every((s) => guarded.includes(s)))
+    for (const d of [...rule.nodes])
+      if (d.type === "decl" && MARGIN_PROPS.test(d.prop)) {
+        if (isZeroSiblingMargin(d)) {
+          const own = sels.filter((s) => !s.includes("::"));
+          margins.cancel.set(d.prop, [
+            ...(margins.cancel.get(d.prop) ?? []),
+            ...own,
+          ]);
+          d.remove();
+          continue;
+        }
+        d.value = d.value.replace(
+          /(^|[\s(,])(-?\d*\.?\d+)em\b/g,
+          "$1calc($2 * var(--font-text-size))",
+        );
+        margins.decls.push(d);
+      }
+  const decls = rule.nodes.filter(
+    (d): d is Declaration => d.type === "decl" && WRAPPER_PAINT(d),
+  );
+  if (!decls.length) return [rule];
+  const hit = selectorParser()
+    .astSync(rule.selector)
+    .nodes.map((s) => s.toString().trim())
+    .filter((s) => guarded.includes(s) && !s.includes("::"));
+  if (!hit.length) return [rule];
+  const paint = rule.cloneBefore({
+    selector: hit.map((s) => `:where(${s})${OWN_PAINT}`).join(", "),
+    nodes: [],
+  });
+  for (const d of decls) paint.append(d.clone());
+  const rest = selectorParser()
+    .astSync(rule.selector)
+    .nodes.map((s) => s.toString().trim())
+    .filter((s) => !hit.includes(s));
+  const rules: Rule[] = [paint];
+  if (rest.length) {
+    rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
+    rule.selector = hit.join(", ");
+  }
+  for (const d of decls) d.remove();
+  if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
+  else rules.push(rule);
+  return rules;
+}
+/**
+ * The wrapper's side padding is inside its width (Discordian's `width:
+ * var(--readable-line-length)` with `padding-left: 4rem`); as the block's
+ * margins it would push a block of that width past the column: the block is
+ * kept within what the padding leaves.
+ */
+function capWrapperPadding(rule: Rule, decls: Declaration[]) {
+  const sides: string[] = [];
+  for (const d of decls) {
+    if (!WRAPPER_PADDING.test(d.prop)) continue;
+    const which = d.prop.match(/^padding(?:-(.*))?$/)![1];
+    const parts = d.value.trim().split(/\s+/);
+    if (which === "left" || which === "right") sides.push(d.value.trim());
+    else if (which === "inline") sides.push(parts[0]!, parts[1] ?? parts[0]!);
+    else if (which === undefined) {
+      if (parts.length > 1 && parts.some((x) => x.includes("("))) return;
+      const right = parts[1] ?? parts[0]!;
+      sides.push(right, parts[3] ?? right);
+    }
+  }
+  const used = sides.filter((v) => !/^0([a-z%]*)?$/i.test(v));
+  if (!used.length) return;
+  const cap = `calc(100% - ${used.join(" - ")})`;
+  const own = rule.nodes.filter(
+    (n): n is Declaration =>
+      n.type === "decl" && /^(max-width|max-inline-size)$/.test(n.prop),
+  );
+  const last = own.at(-1);
+  if (!last) rule.append({ prop: "max-width", value: cap });
+  else
+    last.value = /^[a-z-]+$/i.test(last.value.trim())
+      ? cap
+      : `min(${last.value.trim()}, ${cap})`;
+}
+const WRAPPER_AS_BLOCK = new Map<(d: Declaration) => boolean, boolean>([
+  [isWrapperBox, true],
+]);
+
+/**
  * A margin that offsets the content root. `auto` and 0 are kept: with a
  * max-width they centre the note in Quartz's column (Minimal, Dedication);
  * lengths push it out of the column (`width: 100%` plus `margin: 0 30px`).
@@ -947,8 +1251,31 @@ const isOffsetMargin = (d: Declaration) =>
  * pushes it past a phone's screen (evangelion's `min-width: 80ch`).
  */
 const ROOT_BOX_PROPS = /^(display|min-width|min-inline-size)$/;
+/**
+ * Taking the root out of the flow: in Obsidian the sizer is absolute inside
+ * the relatively positioned reading view, in Quartz it is that view, and
+ * would size and place itself against the page (Elysian's `position:
+ * absolute; width: 100%` covered the right sidebar and ran off the screen).
+ */
+const isRootPosition = (d: Declaration) =>
+  d.prop === "position" && /^(absolute|fixed)\b/i.test(d.value.trim());
+/**
+ * A column flexbox still stacks the blocks, but their margins no longer
+ * collapse (DarkEmber's sizer: twice the space between headings): kept.
+ */
+const isColumnFlex = (d: Declaration) =>
+  d.prop === "display" &&
+  /^(inline-)?flex\b/i.test(d.value.trim()) &&
+  (d.parent?.nodes ?? []).some(
+    (n) =>
+      n.type === "decl" &&
+      ((n.prop === "flex-direction" && /^column\b/i.test(n.value.trim())) ||
+        (n.prop === "flex-flow" && /\bcolumn\b/i.test(n.value))),
+  );
 const isMappedRootLayout = (d: Declaration) =>
-  ROOT_BOX_PROPS.test(d.prop) || isOffsetMargin(d);
+  (ROOT_BOX_PROPS.test(d.prop) && !isColumnFlex(d)) ||
+  isOffsetMargin(d) ||
+  isRootPosition(d);
 const isContentRootLayout = (d: Declaration) =>
   CONTENT_ROOT_PROPS.test(d.prop) || isMappedRootLayout(d);
 
@@ -978,7 +1305,12 @@ function guardLayout(
     rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
     rule.selector = hit.join(", ");
   }
-  for (const d of decls) d.remove();
+  const asBlock = WRAPPER_AS_BLOCK.get(strip);
+  if (asBlock) capWrapperPadding(rule, decls);
+  for (const d of decls) {
+    for (const r of asBlock ? wrapperAsBlock(d) : []) d.before(r);
+    d.remove();
+  }
   if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
   else rules.push(rule);
   return { stripped: decls.length, rules };
@@ -1079,6 +1411,8 @@ interface SelectorResult {
   mappedRoot?: boolean;
   /** The subject is Obsidian's per-block wrapper div, i.e. a top-level block in Quartz. */
   blockWrapper?: boolean;
+  /** Nothing but elided wrappers: "any element", in an ancestor's `:is()`. */
+  elidedOnly?: boolean;
 }
 
 interface Compound {
@@ -1185,6 +1519,20 @@ function wrapperNames(c: Compound): { names: string[]; nodes: SNode[] } | null {
     if (n.type === "class" && BLOCK_WRAPPERS[n.value]) {
       names.push(n.value);
       nodes.push(n);
+    } else if (
+      n.type === "attribute" &&
+      n.attribute === "class" &&
+      (n.operator === "^=" || n.operator === "*=") &&
+      /^el-/.test(n.value ?? "")
+    ) {
+      // `[class^="el-"]` (Hidontknow): the wrappers whose class it matches.
+      const v = n.value!;
+      const matched = Object.keys(BLOCK_WRAPPERS).filter((k) =>
+        n.operator === "^=" ? k.startsWith(v) : k.includes(v),
+      );
+      if (!matched.length) continue;
+      names.push(...matched);
+      nodes.push(n);
     } else if (n.type === "tag" && n.value.toLowerCase() === "div")
       nodes.push(n);
     else if (
@@ -1205,6 +1553,9 @@ function wrapperNames(c: Compound): { names: string[]; nodes: SNode[] } | null {
   }
   return names.length ? { names, nodes } : null;
 }
+
+/** Selectors whose subject was a block wrapper (`.el-h2`), now the block. */
+const WRAPPER_SUBJECTS = new WeakSet<SSelector>();
 
 const bareDiv = (c: Compound) =>
   c.nodes.length > 0 &&
@@ -1311,6 +1662,7 @@ function rewriteBlockWrappers(sel: SSelector): boolean {
       continue;
     }
     // Anywhere else, the wrapper is the block itself.
+    if (i === all.length - 1) WRAPPER_SUBJECTS.add(sel);
     const blocks = [
       ...new Set(found.names.map((n) => BLOCK_WRAPPERS[n]!.block)),
     ];
@@ -1471,6 +1823,74 @@ export function specificity(sel: SSelector | SNode): Spec {
   return spec;
 }
 
+/**
+ * Does Obsidian's block wrapper div (`div.el-h2`) match this compound? Only
+ * judged for `div`, `*` and `:not()` of other tags (`:not(:is(li, ul, ol))`).
+ */
+function matchesWrapperDiv(c: Compound): boolean {
+  const otherTags = (sel: SSelector): boolean =>
+    sel.nodes.length === 1 &&
+    ((sel.nodes[0]!.type === "tag" &&
+      sel.nodes[0]!.value.toLowerCase() !== "div") ||
+      (sel.nodes[0]!.type === "pseudo" &&
+        /^:(is|where)$/i.test(sel.nodes[0]!.value) &&
+        (sel.nodes[0] as selectorParser.Pseudo).nodes.every(otherTags)));
+  return (
+    c.nodes.length > 0 &&
+    c.nodes.every(
+      (n) =>
+        (n.type === "tag" && n.value.toLowerCase() === "div") ||
+        n.type === "universal" ||
+        (n.type === "pseudo" &&
+          n.value === ":not" &&
+          (n as selectorParser.Pseudo).nodes.every(otherTags)),
+    )
+  );
+}
+
+/**
+ * `.markdown-preview-section :not(:is(li, ul, ol)) > h2` (Micro Mike's
+ * heading margins): in Obsidian the block wrapper is the element in between
+ * for every top-level block, and Quartz has none, so top-level blocks never
+ * match. When the wrapper would match, a copy of the selector without that
+ * compound (its specificity moved onto the note) matches them; the original
+ * still matches nested ones.
+ */
+function wrapperAncestors(selectors: selectorParser.Root): boolean {
+  let changed = false;
+  for (const sel of [...selectors.nodes]) {
+    const all = splitCompounds(sel);
+    for (let i = 1; i < all.length - 1; i++) {
+      const box = all[i - 1]!;
+      const d = all[i]!;
+      if (
+        !classesOf(box).some(
+          (k) => CONTENT_WRAPPERS.has(k) || CONTENT_ROOT_CLASSES.includes(k),
+        ) ||
+        d.before?.value.trim() !== "" ||
+        !matchesWrapperDiv(d) ||
+        // `div > .el-ul`: the div is the sizer, rewriteBlockWrappers' case.
+        wrapperNames(all[i + 1]!) !== null ||
+        !/^[\s>]*$/.test(all[i + 1]!.before?.value ?? "")
+      )
+        continue;
+      const copy = sel.clone() as SSelector;
+      const parts = splitCompounds(copy);
+      const spec = specificity({
+        nodes: parts[i]!.nodes,
+      } as unknown as SSelector);
+      const last = parts[i - 1]!.nodes.at(-1)!;
+      for (const q of pad(spec).reverse()) last.parent!.insertAfter(last, q);
+      for (const n of parts[i]!.nodes) n.remove();
+      parts[i]!.before!.remove();
+      selectors.insertAfter(sel, copy);
+      changed = true;
+      break;
+    }
+  }
+  return changed;
+}
+
 function splitMixedIs(selectors: selectorParser.Root, ctx: Ctx): boolean {
   let split = false;
   for (const sel of [...selectors.nodes]) {
@@ -1518,6 +1938,9 @@ function processSelector(
   sel: SSelector,
   ctx: Ctx,
   top = false,
+  // False inside `:is()` / `:where()` of an ancestor (`:is(.markdown-reading-view,
+  // .markdown-source-view) p`): a wrapper there is elided, not a wrapper subject.
+  inSubject = true,
 ): SelectorResult {
   const wrappers = rewriteBlockWrappers(sel);
   const pusher = rewritePusher(sel) || wrappers;
@@ -1531,7 +1954,7 @@ function processSelector(
   let structural = false;
   const results: CompoundResult[] = [];
   for (let i = 0; i < compounds.length; i++) {
-    const isSubject = i === compounds.length - 1;
+    const isSubject = inSubject && i === compounds.length - 1;
     const res = processCompound(compounds[i]!.nodes, isSubject, ctx);
     if (res.drop) return { drop: res.drop };
     results.push(res);
@@ -1697,7 +2120,9 @@ function processSelector(
   }
 
   // `.workspace .workspace-tab-container > *` → nothing Quartz-specific left.
-  if (anyElided && !anyConcrete) return { drop: "wrapperSubject" };
+  // An ancestor's `:is(.markdown-reading-view, …)` alternative is just "an
+  // ancestor": kept, as the elided wrapper is anywhere else above the subject.
+  if (anyElided && !anyConcrete && inSubject) return { drop: "wrapperSubject" };
   // From the original subject compound, so a content wrapper mapped onto the
   // root (`.markdown-preview-sizer`) keeps its own padding: in Obsidian that
   // sits inside the file margins.
@@ -1708,8 +2133,9 @@ function processSelector(
     structural,
     contentRoot: top && subjectIsRoot,
     subjectIsRoot,
+    elidedOnly: anyElided && !anyConcrete,
     mappedRoot: top && !subjectIsRoot && subjectMapped,
-    blockWrapper: top && blockSubject,
+    blockWrapper: top && (blockSubject || WRAPPER_SUBJECTS.has(sel)),
   };
 }
 
@@ -1742,6 +2168,7 @@ function processCompound(
   let wrapper = false;
   let concrete = false; // something that actually narrows the match in Quartz
   let hasType = false;
+  let divTag = false;
   let structuralTarget = false;
   let hasRootish = false;
   let named = false;
@@ -1771,6 +2198,27 @@ function processCompound(
     node.remove();
     changed = true;
   };
+  // `.workspace`'s own state: Quartz's sidebars are always-open docks, so
+  // `.workspace:not(.is-right-sidedock-open)` (Neumorphism's collapsed-dock
+  // margins) never matches and `.workspace.is-left-sidedock-open` always does.
+  if (hasClass("workspace")) {
+    for (const n of [...nodes]) {
+      const state =
+        n.type === "class"
+          ? WORKSPACE_STATE[n.value]
+          : n.type === "pseudo" &&
+              n.value === ":not" &&
+              n.nodes.length === 1 &&
+              String(n.nodes[0]).trim().startsWith(".")
+            ? WORKSPACE_STATE[String(n.nodes[0]).trim().slice(1)]
+            : undefined;
+      if (state === undefined) continue;
+      const holds = n.type === "class" ? state : !state;
+      if (!holds) return { drop: "staticFalse" };
+      replace(n, pad(CLASS_SPEC));
+      nodes.splice(nodes.indexOf(n), 1);
+    }
+  }
   // A body class on another element is that element's own state
   // (`.multi-select-pill.is-focused`), not <body>'s: unknown, kept verbatim.
   const elsewhere =
@@ -1899,6 +2347,7 @@ function processCompound(
         hasType = true;
         if (tag === "html") hasRootish = true;
         if (tag === "body") bodyish = true;
+        else if (tag === "div") divTag = true;
         else concrete = true;
         break;
       }
@@ -1908,17 +2357,19 @@ function processCompound(
           node.value === ":has" ||
           LOGICAL_PSEUDOS.has(node.value)
         ) {
-          const res = processLogical(node, ctx);
+          const res = processLogical(node, ctx, isSubject);
           if (res.drop) return { drop: res.drop };
           if (res.changed) changed = true;
           // `li:not(.task-list-item)` is still any li.
-          if (res.concrete) {
+          if (res.concrete && !res.wrapper) {
             concrete = true;
-            if (node.value !== ":not") named = true;
+            if (node.value !== ":not" && !res.tags) named = true;
           }
           // `:is(.left.sidebar, .right.sidebar)` is as structural as either.
           if (res.structural) structuralTarget = true;
           if (res.contentRoot) contentRoot = true;
+          if (res.wrapper) wrapper = true;
+          if (res.tags) tags.push(...res.tags);
         } else if (node.value === ":root") {
           concrete = true;
           hasRootish = true;
@@ -1934,6 +2385,10 @@ function processCompound(
     }
   }
 
+  // `div.markdown-reading-view`, `div:is(.markdown-reading-view)`: the div is
+  // the wrapper itself, gone in Quartz, not any div (ITS's `.view-content >
+  // div:is(…) > div` sized every nested div of the page as a container).
+  if (divTag && !(wrapper && !named)) concrete = true;
   if (bodyish && !hasType && !concrete) {
     // A bare body-class compound (`.theme-dark`, `.css-settings-manager`) must
     // still only match <body>.
@@ -1970,11 +2425,20 @@ function processCompound(
 }
 
 /** :not / :is / :where / :has with selector-list arguments. */
-function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
+function processLogical(
+  node: selectorParser.Pseudo,
+  ctx: Ctx,
+  inSubject = true,
+): CompoundResult {
   let changed = false;
   let concrete = false;
   let allStructural = true;
   let allContentRoot = true;
+  let allElided = true;
+  // `:is(.cm-header-1, h1)` once the editor's alternative is gone: still a
+  // bare `h1`, which the note-only scoping of bare tags must see.
+  const altTags: string[] = [];
+  let allTags = true;
   for (const inner of [...node.nodes]) {
     // A never-matching specificity placeholder (see splitMixedIs).
     if (
@@ -1983,7 +2447,12 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
       )
     )
       continue;
-    const res = processSelector(inner, ctx);
+    const res = processSelector(
+      inner,
+      ctx,
+      false,
+      inSubject || node.value === ":not" || node.value === ":has",
+    );
     if (res.drop) {
       inner.remove();
       changed = true;
@@ -1992,6 +2461,11 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
       if (res.changed) changed = true;
       if (!res.structural) allStructural = false;
       if (!res.subjectIsRoot) allContentRoot = false;
+      if (!res.elidedOnly) allElided = false;
+      const own = inner.nodes.filter((n) => n.type !== "comment");
+      if (own.length === 1 && own[0]!.type === "tag")
+        altTags.push(own[0]!.value.toLowerCase());
+      else allTags = false;
     }
   }
   if (node.nodes.length === 0) {
@@ -2012,5 +2486,7 @@ function processLogical(node: selectorParser.Pseudo, ctx: Ctx): CompoundResult {
     concrete: concrete && node.value !== ":not",
     structural: alternatives && concrete && allStructural,
     contentRoot: alternatives && concrete && allContentRoot,
+    wrapper: alternatives && concrete && allElided,
+    tags: alternatives && allTags && altTags.length ? altTags : undefined,
   };
 }

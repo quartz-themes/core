@@ -166,6 +166,7 @@ export const CONTENT_ROOT_CLASSES = [
  * So are lists and links: Obsidian's explorer and outline are divs, Quartz's
  * explorer, table of contents, backlinks and tag lists are `ul > li` of `<a>`
  * (a bare `a { color }` would override the theme's explorer row colours).
+ * And rules: Quartz draws one above its footer, outside the note.
  */
 export const BARE_TAGS: Record<string, "drop" | "content"> = {
   button: "drop",
@@ -182,6 +183,7 @@ export const BARE_TAGS: Record<string, "drop" | "content"> = {
   ol: "content",
   li: "content",
   a: "content",
+  hr: "content",
 };
 
 /** Wrapper classes that do have a Quartz counterpart. */
@@ -299,6 +301,12 @@ export const BODY_STATE: Record<string, boolean | "mode"> = {
   "mod-rtl": false,
   "is-grabbing": false,
   "colorful-frame": false,
+  "is-left-sidedock-open": true,
+  "is-right-sidedock-open": true,
+};
+
+/** Classes Obsidian puts on `.workspace`, as Quartz's layout has them. */
+export const WORKSPACE_STATE: Record<string, boolean> = {
   "is-left-sidedock-open": true,
   "is-right-sidedock-open": true,
 };

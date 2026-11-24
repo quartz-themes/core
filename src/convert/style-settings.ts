@@ -158,9 +158,15 @@ export function resolveStyleSettings(
   user: StyleSettingsExport = {},
 ): ResolvedStyleSettings {
   const config: Record<string, Record<string, StyleSettingDef>> = {};
-  for (const s of sections)
+  // The plugin keeps the first section with an id, and within a section the
+  // first valid setting with an id (Baseline's "Colorful headings" heading
+  // shadows the class-select after it, whose classes Obsidian never applies).
+  const sectionIds = new Set<string>();
+  for (const s of sections) {
+    if (sectionIds.has(s.id)) continue;
+    sectionIds.add(s.id);
     for (const st of s.settings) {
-      if (!st?.id) continue;
+      if (!st?.id || config[s.id]?.[st.id]) continue;
       if (st.type === "class-select" || st.type === "variable-select") {
         // The plugin (1.0.9) only accepts non-empty string options, or objects
         // with non-empty string label and value; a select without any is
@@ -170,6 +176,7 @@ export function resolveStyleSettings(
         (config[s.id] ??= {})[st.id] = { ...st, options };
       } else (config[s.id] ??= {})[st.id] = st;
     }
+  }
   const get = (sec: string, id: string) => user[`${sec}@@${id}`];
 
   // --- classes (initClasses) ---

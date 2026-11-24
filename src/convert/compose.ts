@@ -263,6 +263,97 @@ export const EXPLORER_CSS = `@layer quartz-base {
 }
 }`;
 
+/**
+ * Obsidian's window never scrolls sideways: what a theme hangs past its edge
+ * (Lancer's title ornaments, Bureau's heading markers) is cut off. Quartz's
+ * page would scroll instead, on phones by the width of a decoration. On the
+ * root element, whose overflow is the viewport's: absolutely positioned
+ * ornaments placed against the viewport (Lancer's title flourishes) escape
+ * any element's clip below it. The vertical scroll stays as it is.
+ */
+export const PAGE_CSS = `@layer quartz-base {
+:where(:root) {
+  overflow-x: clip !important;
+}
+}`;
+
+/**
+ * Obsidian variables Quartz itself defines on `:root` (quartz/util/theme.ts),
+ * pointing at its own palette and fonts. Obsidian defines them on `<body>`
+ * only, so on `:root` they are unset: a theme's
+ * `:root { --x: var(--font-text, -apple-system) }` takes the fallback there
+ * (Elementra), and Quartz's font here. Converted app.css defines them on
+ * `<body>` again, so only `:root` loses them.
+ */
+export const QUARTZ_ROOT_VARS = [
+  "--background-primary",
+  "--background-primary-alt",
+  "--background-secondary",
+  "--background-secondary-alt",
+  "--background-modifier-border",
+  "--background-modifier-border-hover",
+  "--background-modifier-border-focus",
+  "--text-normal",
+  "--text-muted",
+  "--text-faint",
+  "--text-accent",
+  "--text-accent-hover",
+  "--text-on-accent",
+  "--text-on-accent-inverted",
+  "--text-highlight-bg",
+  "--interactive-normal",
+  "--interactive-hover",
+  "--interactive-accent",
+  "--interactive-accent-hover",
+  "--color-base-00",
+  "--color-base-05",
+  "--color-base-10",
+  "--color-base-20",
+  "--color-base-25",
+  "--color-base-30",
+  "--color-base-35",
+  "--color-base-40",
+  "--color-base-50",
+  "--color-base-60",
+  "--color-base-70",
+  "--color-base-100",
+  "--font-text",
+  "--font-monospace",
+  "--font-interface",
+  "--nav-item-color",
+  "--nav-item-color-hover",
+  "--nav-item-color-active",
+  "--nav-item-background-hover",
+  "--nav-item-background-active",
+  "--tag-background",
+  "--tag-color",
+  "--tag-background-hover",
+  "--icon-color",
+  "--icon-color-hover",
+  "--icon-color-active",
+  "--divider-color",
+  "--link-color",
+  "--link-color-hover",
+  "--accent-h",
+  "--accent-s",
+  "--accent-l",
+];
+
+/**
+ * Unset {@link QUARTZ_ROOT_VARS} on `:root`, as in Obsidian, except those the
+ * theme sets there itself (which Quartz's unlayered rule overrides either way).
+ */
+export function rootVarsCss(css: string): string {
+  const own = new Set<string>();
+  for (const m of css.matchAll(
+    /(?:^|[{},;])\s*(?::root|html)\b[^{};]*\{([^{}]*)\}/g,
+  ))
+    for (const d of m[1]!.matchAll(/(--[\w-]+)\s*:/g)) own.add(d[1]!);
+  const unset = QUARTZ_ROOT_VARS.filter((v) => !own.has(v));
+  if (!unset.length) return "";
+  return `@layer quartz-base {\n:root {\n${unset.map((v) => `  ${v}: initial !important;`).join("\n")}\n}\n}`;
+}
+
 export interface ComposeInput {
   app: string;
   theme: string;
@@ -318,6 +409,8 @@ export function composeStylesheet({
     backdropCss(),
     "}",
     EXPLORER_CSS,
+    PAGE_CSS,
+    rootVarsCss(`${theme}\n${settings}`),
   ]
     .filter(Boolean)
     .join("\n");
