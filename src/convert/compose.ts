@@ -38,11 +38,27 @@ export const BRIDGE: Record<string, string> = {
  * Obsidian (its `pre` sits in the note directly), so it doesn't get the UA's
  * 40px figure margins.
  */
-export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, input[type="checkbox"]) {
+export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, input[type="checkbox"]) {
   all: revert;
 }
 :where(.markdown-preview-view) :where(figure[data-rehype-pretty-code-figure]) {
   margin: 0;
+}
+/* Quartz's screen-reader-only elements (the footnotes' "Footnotes" heading)
+   have no Obsidian counterpart: hidden, and uncounted, whatever the theme does
+   to their element. */
+.markdown-preview-view .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  counter-increment: none !important;
+  counter-reset: none !important;
 }
 `;
 
@@ -255,6 +271,19 @@ export interface ComposeInput {
 }
 
 /**
+ * Obsidian writes the user's appearance settings onto `<body>` as an inline
+ * style, at their defaults `--font-text-size: 16px` (Appearance → Font size).
+ * An inline style beats every normal rule for `<body>`, so a theme's
+ * `body { --font-text-size: 18px }` loses there; only `!important` wins, or a
+ * rule on an element inside. The id padding gives this rule the same reach.
+ */
+export const INLINE_BODY_CSS = `body${":not(#qt-0)".repeat(16)} {
+  --zoom-factor: 1;
+  --font-text-size: 16px;
+  --indent-size: 4;
+}`;
+
+/**
  * @returns `main` (minifiable) and `raw`, which must be served as a separate
  *   resource so Quartz's minifier can't reject the main sheet because of it.
  */
@@ -280,6 +309,7 @@ export function composeStylesheet({
     theme,
     settings,
     quartzFonts && quartzFontsCss(),
+    INLINE_BODY_CSS,
     backdropCss(),
     "}",
     EXPLORER_CSS,

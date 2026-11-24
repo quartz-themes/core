@@ -73,9 +73,13 @@ function splitTop(value: string, sep: RegExp): string[] {
 
 /** The image tokens of a background value's layers. */
 function imageTokens(layers: string[]): string[] {
-  return layers.flatMap((l) =>
-    splitTop(l, /[\s/]/).filter((t) => IMAGE_FN.test(t) || /^var\(/i.test(t)),
-  );
+  return layers.flatMap((l) => {
+    const toks = splitTop(l, /[\s/]/);
+    // Beside an image function, a `var()` is its position, size or box.
+    return toks.some((t) => IMAGE_FN.test(t))
+      ? toks.filter((t) => IMAGE_FN.test(t))
+      : toks.filter((t) => /^var\(/i.test(t));
+  });
 }
 
 const IMG = "--qt-img";
@@ -107,12 +111,15 @@ export function splitBackgroundVars(root: Root): Set<string> {
     if (
       defs.get(name)?.some((d) => {
         const layers = splitTop(d.value, /,/);
+        const toks = layers.map((l) => splitTop(l, /[\s/]/));
+        const hasImage = (t: string[]) => t.some((x) => IMAGE_FN.test(x));
         return (
-          layers.length > 1 &&
-          imageTokens(layers.slice(0, -1)).some((t) => IMAGE_FN.test(t)) &&
-          !splitTop(layers[layers.length - 1]!, /[\s/]/).some((t) =>
-            IMAGE_FN.test(t),
-          )
+          // Images then a colour,
+          (layers.length > 1 &&
+            toks.slice(0, -1).some(hasImage) &&
+            !hasImage(toks[toks.length - 1]!)) ||
+          // or a layer with its position, size or repeat (Whim's pattern).
+          toks.some((t) => hasImage(t) && t.length > 1)
         );
       })
     )
@@ -184,10 +191,11 @@ export function splitBackground(
       } else tail = color = vars[0]!;
       return;
     }
+    const withImage = toks.some((t) => IMAGE_FN.test(t));
     for (const tok of toks) {
       if (IMAGE_FN.test(tok)) images.push(tok);
       else if (/^var\(/i.test(tok)) {
-        images.push(tok);
+        if (!withImage) images.push(tok);
         if (last) color = tok;
       } else if (
         last &&

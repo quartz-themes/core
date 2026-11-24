@@ -275,6 +275,70 @@ function backdropLayer(c: Compound): number {
   return -1;
 }
 
+/** Properties an element inherits from its parent. */
+const INHERITED =
+  /^(?:--.*|color|font(?:-.*)?|letter-spacing|word-spacing|line-height|text-(?:transform|shadow|rendering|align|indent|wrap|underline-offset|decoration-skip-ink)|-webkit-font-smoothing|-moz-osx-font-smoothing|font-smooth|hyphens|tab-size|direction|quotes|caret-color)$/i;
+/** The note's own boxes, which hold Obsidian's properties block. */
+const NOTE_BOXES = new Set([
+  "markdown-preview-view",
+  "markdown-rendered",
+  "markdown-preview-sizer",
+  "markdown-preview-section",
+]);
+
+/**
+ * Obsidian's properties block sits inside the note's sizer and inherits its
+ * text styles (Cairn's `.markdown-rendered { letter-spacing }`); Quartz's sits
+ * above the note. Each rule for the note's boxes also gives the block its
+ * inherited properties, at zero specificity so that any rule for the block
+ * itself wins, as over inheritance.
+ */
+function propertiesInherit(root: Root): void {
+  root.walkRules((rule) => {
+    const parent = rule.parent as AtRule | undefined;
+    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
+    const decls = (rule.nodes ?? []).filter(
+      (n): n is Declaration => n.type === "decl" && INHERITED.test(n.prop),
+    );
+    if (!decls.length) return;
+    const out: string[] = [];
+    try {
+      selectorParser((selectors) => {
+        selectors.each((sel) => {
+          if (
+            OTHER_PANE.test(String(sel)) ||
+            /metadata-|embed|callout/.test(String(sel))
+          )
+            return;
+          const all = splitCompounds(sel);
+          const subject = all[all.length - 1]!;
+          const classes = classesOf(subject);
+          if (
+            !classes.some((k) => NOTE_BOXES.has(k)) ||
+            classes.some(
+              (k) => !NOTE_BOXES.has(k) && !/^(mod|is|allow)-/.test(k),
+            ) ||
+            subject.nodes.some(
+              (n) =>
+                (n.type === "tag" && n.value !== "div") ||
+                (n.type === "pseudo" && !/^:(not|is|where)$/i.test(n.value)),
+            )
+          )
+            return;
+          out.push(`:where(${String(sel).trim()} .metadata-container)`);
+        });
+      }).processSync(rule.selector);
+    } catch {
+      return;
+    }
+    if (!out.length) return;
+    const copy = postcss.rule({ selector: out.join(", ") });
+    // Inherited values never carry !important: the block's own rules win.
+    for (const d of decls) copy.append(d.clone({ important: false }));
+    rule.after(copy);
+  });
+}
+
 /**
  * A selector whose subject has an `:is()` / `:where()` of compounds, once per
  * alternative (`.leaf :is(.view-header, .view-content)` paints `.view-content`).
@@ -309,16 +373,17 @@ function subjectAlternatives(sel: SSelector): SSelector[] {
  * the same box (Obsidian's own pane backgrounds).
  */
 function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
-  const copies: [Rule, Map<number, string[]>, Declaration[]][] = [];
+  const copies: [Rule, Map<number, [string, Spec][]>, Declaration[]][] = [];
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
     const decls = (rule.nodes ?? []).filter(
       (n): n is Declaration =>
-        n.type === "decl" && BACKGROUND_PROP.test(n.prop),
+        n.type === "decl" &&
+        (BACKGROUND_PROP.test(n.prop) || n.prop.startsWith("--")),
     );
     if (!decls.length) return;
-    const byLayer = new Map<number, string[]>();
+    const byLayer = new Map<number, [string, Spec][]>();
     try {
       selectorParser((selectors) => {
         selectors.each((whole) => {
@@ -342,6 +407,18 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
             return;
           const layer = backdropLayer(subject);
           if (layer < 0) return;
+          // A box's own conditions (`.markdown-reading-view:has(> .sci-fi)`)
+          // can't move to <body>: dropped, they'd always apply.
+          if (
+            all.some(
+              (c, i) =>
+                backdropLayer(c) >= 0 &&
+                c.nodes.some(
+                  (n) => n.type === "pseudo" && /^:has$/i.test(n.value),
+                ),
+            )
+          )
+            return;
           // Body conditions: a body-ish first compound, else non-wrapper
           // classes and :not()s of the ancestors (Style Settings toggles live
           // on <body>).
@@ -371,9 +448,8 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
           const head = `body${conds.map(String).join("")}`;
           const own = specificity(selectorParser().astSync(head).first);
           const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
-          const padded = `${head}${pad(rest).map(String).join("")}`;
           if (!byLayer.has(layer)) byLayer.set(layer, []);
-          byLayer.get(layer)!.push(padded);
+          byLayer.get(layer)!.push([head, rest]);
         }
       }).processSync(rule.selector);
     } catch {
@@ -381,11 +457,34 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
     }
     if (byLayer.size) copies.push([rule, byLayer, decls]);
   });
+  const selector = (heads: [string, Spec][], ids = 0) =>
+    [
+      ...new Set(
+        heads.map(
+          ([head, [a, b, c]]) =>
+            `${head}${pad([a + ids, b, c])
+              .map(String)
+              .join("")}`,
+        ),
+      ),
+    ].join(", ");
   for (const [rule, byLayer, decls] of copies)
-    for (const [layer, bodies] of byLayer) {
-      const copy = postcss.rule({ selector: [...new Set(bodies)].join(", ") });
-      for (const d of decls) copy.append(...layerDecls(d, layer, split));
-      if (copy.nodes.length) rule.before(copy);
+    for (const [layer, heads] of byLayer) {
+      const bg = postcss.rule({ selector: selector(heads) });
+      for (const d of decls)
+        if (!d.prop.startsWith("--")) bg.append(...layerDecls(d, layer, split));
+      if (bg.nodes.length) rule.before(bg);
+      // Variables set on a box inherit into everything inside it, the note
+      // and the inner boxes' backgrounds included (Fantasy's translucent
+      // `--background-primary` on `.app-container`). On <body> they must
+      // beat body-level definitions, and inner boxes outer ones, as
+      // inheritance does: a few ids of padding, more the further in.
+      const vars = postcss.rule({
+        selector: selector(heads, BODY_LAYER - layer),
+      });
+      for (const d of decls)
+        if (d.prop.startsWith("--")) vars.append(d.clone());
+      if (vars.nodes.length) rule.before(vars);
     }
 }
 
@@ -487,6 +586,7 @@ export function convertObsidianCss(
 
   const split = splitBackgroundVars(root);
   paneBackgrounds(root, split);
+  propertiesInherit(root);
 
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
@@ -1422,6 +1522,18 @@ function processCompound(
     node.remove();
     changed = true;
   };
+  // A body class on another element is that element's own state
+  // (`.multi-select-pill.is-focused`), not <body>'s: unknown, kept verbatim.
+  const elsewhere =
+    !nodes.some((n) => n.type === "tag" && /^(body|html)$/i.test(n.value)) &&
+    nodes.some(
+      (n) =>
+        n.type === "class" &&
+        !(n.value in MODE_ATTR) &&
+        !(n.value in ctx.bodyState) &&
+        WRAPPER_MAP[n.value] === undefined &&
+        !WRAPPER_CLASSES.has(n.value),
+    );
 
   for (const node of nodes) {
     switch (node.type) {
@@ -1430,7 +1542,7 @@ function processCompound(
         if (v in MODE_ATTR) {
           replace(node, nodesOf(`:is([saved-theme="${MODE_ATTR[v]}"] *)`));
           bodyish = true;
-        } else if (v in ctx.bodyState) {
+        } else if (v in ctx.bodyState && !elsewhere) {
           if (ctx.bodyState[v] === false) return { drop: "staticFalse" };
           replace(node, pad(CLASS_SPEC));
           bodyish = true;

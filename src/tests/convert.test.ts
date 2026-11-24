@@ -91,7 +91,7 @@ describe("selector rewriting", () => {
     );
     assert.equal(
       conv(".markdown-reading-view > .markdown-preview-view { color: red }"),
-      ":not(.qt-0)>.markdown-preview-view { color: red }",
+      ":not(.qt-0)>.markdown-preview-view { color: red } :where(:not(.qt-0)>:not(.qt-0) .metadata-container) { color: red }",
     );
     assert.equal(
       conv("p:not(button) { color: red }"),
@@ -127,7 +127,7 @@ describe("selector rewriting", () => {
       conv(
         ":is(.markdown-preview-view,.markdown-rendered) .markdown-preview-sizer { letter-spacing: 2px }",
       ),
-      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px }",
+      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px } :where(:is(.markdown-preview-view,.markdown-rendered) :not(.qt-0) .metadata-container) { letter-spacing: 2px }",
     );
   });
 
@@ -198,6 +198,20 @@ describe("selector rewriting", () => {
       glass,
       /--qt-bg10-color: var\(--amb--qt-col\); --qt-bg10-image: none; --qt-bg10-tail: var\(--amb--qt-img\)/,
     );
+    // Also a single layer with its box, position and size (Whim).
+    assert.match(
+      conv(
+        ":root { --pat: repeating-radial-gradient(red, blue) content-box 50% / 10px repeat } .workspace { background: var(--pat) }",
+      ),
+      /--pat--qt-img: repeating-radial-gradient\(red, blue\); --pat--qt-col: transparent/,
+    );
+    // Beside an image, a var() is its position or size, not another image.
+    assert.match(
+      conv(
+        ".view-content { background: linear-gradient(red, blue) var(--pos) / var(--size) }",
+      ),
+      /--qt-bg1-image: linear-gradient\(red, blue\);/,
+    );
     // Font stacks and other comma lists are left alone.
     assert.doesNotMatch(
       conv(":root { --f: Inter, sans-serif } body { font-family: var(--f) }"),
@@ -218,6 +232,22 @@ describe("selector rewriting", () => {
     assert.doesNotMatch(
       conv(".workspace-split.mod-horizontal { background: red }"),
       /--qt-bg/,
+    );
+    // Variables on a box inherit into the note and the inner boxes: on
+    // <body>, ahead of body-level definitions, inner boxes ahead of outer.
+    assert.equal(
+      conv("body .app-container { --background-primary: red }"),
+      "body:not(#qt-0):not(.qt-0) { --background-primary: red }",
+    );
+    assert.match(
+      conv(".view-content { --x: red }"),
+      /^body(:not\(#qt-0\)){9}:not\(.qt-0\) \{ --x: red \}$/,
+    );
+    assert.equal(conv(".mod-left-split .workspace-tabs { --x: red }"), "");
+    // A box's own :has() condition can't move to <body> (Fancy-a-Story).
+    assert.doesNotMatch(
+      conv(".markdown-reading-view:has(> .sci-fi) { --skin: on }"),
+      /^body/,
     );
     // Sidebars, popovers and other view types are left alone.
     assert.equal(
@@ -240,6 +270,40 @@ describe("selector rewriting", () => {
         '.workspace-leaf-content:not([data-type="markdown"]) > .view-content { background: red }',
       ),
       /--qt-bg/,
+    );
+  });
+
+  test("a body class on another element is that element's state", () => {
+    // Paperglow's focused pill isn't every pill.
+    assert.equal(
+      conv(".multi-select-pill.is-focused { color: red }"),
+      ".multi-select-pill.is-focused { color: red }",
+    );
+    assert.equal(
+      conv("body.is-focused .x { color: red }"),
+      "body:not(.qt-0) .x { color: red }",
+    );
+  });
+
+  test("the properties block inherits the note's text styles", () => {
+    // Obsidian's block is inside the note; Quartz's above it (Cairn).
+    assert.match(
+      conv(".markdown-rendered { letter-spacing: 1px; padding: 4px }"),
+      /:where\(:not\(\.qt-0\) \.metadata-container\) \{ letter-spacing: 1px \}/,
+    );
+    // As inherited values: the block's own rules win over !important (Techwear).
+    assert.match(
+      conv(".markdown-rendered { color: red !important }"),
+      /:where\(:not\(\.qt-0\) \.metadata-container\) \{ color: red \}/,
+    );
+    // Not from other boxes, nor layout.
+    assert.doesNotMatch(
+      conv(".markdown-rendered h1 { letter-spacing: 1px }"),
+      /metadata-container/,
+    );
+    assert.doesNotMatch(
+      conv(".markdown-rendered { padding: 4px }"),
+      /metadata-container/,
     );
   });
 
@@ -476,7 +540,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view.is-readable-line-width, .callout { padding-inline: 2em; padding-top: 1em; color: red }",
       ),
-      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red }",
+      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red } :where(:not(.qt-0):not(.qt-0) .metadata-container) { color: red }",
     );
     // Descendants keep theirs.
     assert.equal(
@@ -488,7 +552,7 @@ describe("selector rewriting", () => {
       conv(
         "body, .markdown-preview-view { padding: 1em; overflow: hidden; color: red }",
       ),
-      ".markdown-preview-view { color: red } body { padding: 1em; color: red }",
+      ".markdown-preview-view { color: red } body { padding: 1em; color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     // Themes set the file margins on .markdown-rendered too (same element), as
     // margins, or behind a body class, which nests the subject in :is().
@@ -496,7 +560,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-rendered { padding: 24px 32px; margin: 0 15px; color: red }",
       ),
-      ".markdown-rendered { color: red }",
+      ".markdown-rendered { color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     assert.equal(
       conv(
@@ -517,7 +581,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view { min-width: 80ch; max-width: 50%; color: red }",
       ),
-      ".markdown-preview-view { max-width: 50%; color: red }",
+      ".markdown-preview-view { max-width: 50%; color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
   });
 
@@ -745,6 +809,17 @@ describe("compose", () => {
         "metadata-container",
       ),
       false,
+    );
+  });
+
+  test("body keeps Obsidian's inline font size against normal theme rules", () => {
+    const { main } = composeStylesheet({
+      app: "",
+      theme: "body { --font-text-size: 18px }",
+    });
+    assert.match(
+      main,
+      /body { --font-text-size: 18px }[\s\S]*body(:not\(#qt-0\)){16} \{\n {2}--zoom-factor: 1;\n {2}--font-text-size: 16px;/,
     );
   });
 

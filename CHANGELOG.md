@@ -60,6 +60,22 @@
 - Nested CSS (`body { .view-content { … } }`, `.callout { &[data-callout=tip] { … } }`, in 98
   themes) is converted: nested rules are flattened first, as the browser matches them. They used
   to pass through unconverted, matching Quartz's markup only by accident.
+- Variables a theme sets on the boxes around the note (`.app-container`, `.workspace`, the main
+  split, the leaf, `.view-content`, in 136 themes) apply: in Obsidian they inherit into the note
+  and the boxes' backgrounds (Fantasy's translucent panes), and were dropped with the boxes. Ones
+  gated on the box's own `:has()` stay out, as that condition can't be checked on the page.
+- The properties block inherits the note's text styles, as Obsidian's does from inside the note:
+  a theme's letter spacing or font on `.markdown-rendered` (Cairn) reaches it, while rules for
+  the block itself still win, also over the note's `!important` ones.
+- Quartz's screen-reader-only footnotes heading stays hidden: a theme's `h2` margins and counters
+  made it take up space above the footnotes. Nor do Quartz's own footnotes margin and border
+  show through: in Obsidian the space above the footnotes is the theme's `hr`.
+- The note's font size is Obsidian's default 16px unless a theme insists: Obsidian writes the
+  Appearance font size onto `<body>` as an inline style, so a theme's `body { --font-text-size }`
+  has no effect there, only `!important` or a rule on the note itself does (Amber Cathode and ~65
+  others rendered larger text than in Obsidian).
+- A body class on another element is that element's state: `.multi-select-pill.is-focused` no
+  longer styles every pill as focused (Paperglow).
 - Platform rules resolve as on Linux: themes that make the window translucent on macOS
   (`:not(.mod-windows):not(.mod-linux) { --background-primary: transparent }`) left the page
   unpainted (Claudian, Meridian), as no platform matched.
