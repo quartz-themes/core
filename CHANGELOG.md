@@ -2,6 +2,9 @@
 
 ### Patch Changes
 
+- Obsidian's external-link icon (`public/external-link.svg`, a file shipped inside the app)
+  is inlined into the bundled app.css; it 404'd on Quartz sites. The bundled app.css is
+  regenerated with this release's converter.
 - Bases render again: Obsidian lays out its tables as absolutely positioned, virtualised
   `<div>`s, and those layout rules no longer apply to Quartz's `<table>`. Themes still colour
   and border them.
