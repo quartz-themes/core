@@ -42,8 +42,9 @@
 - Rules for Obsidian's block wrappers (`.el-p`, `.el-table`, `.el-pre`, `.el-h1`…, in ~100 themes
   and Obsidian's own CSS) apply to the blocks Quartz renders: `div.el-p > p` is the paragraph,
   `.el-table` Quartz's `.table-container`, `.el-pre` the code block, `.el-hr hr` the note's rules
-  (Willemstad) but not the footnotes'. Headings after tables and code blocks get Obsidian's
-  spacing again.
+  (Willemstad) but not the footnotes'; a wrapper's any-child (`div:is(.el-ul, .el-ol) > *`) is its
+  block and the `div` a wrapper sits in is the note (Baseline's list spacing). Headings after
+  tables and code blocks get Obsidian's spacing again.
 - What a theme paints behind the note paints Quartz's page, composited as in Obsidian. Obsidian
   stacks several boxes there (the reading view, `.view-content`, the leaf, the tabs, the main
   split, `.workspace`, `.horizontal-main-container`, `.app-container`, `body`); the innermost
@@ -73,7 +74,8 @@
   (Micro Mike's gradient panes).
 - The properties block inherits the note's text styles, as Obsidian's does from inside the note:
   a theme's letter spacing or font on `.markdown-rendered` (Cairn) reaches it, while rules for
-  the block itself still win, also over the note's `!important` ones.
+  the block itself still win, also over the note's `!important` ones, and through `:is()` of the
+  note's boxes (Blue Topaz's letter spacing).
 - Quartz's screen-reader-only footnotes heading stays hidden: a theme's `h2` margins and counters
   made it take up space above the footnotes. Nor do Quartz's own footnotes margin and border
   show through: in Obsidian the space above the footnotes is the theme's `hr`.

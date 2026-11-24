@@ -304,7 +304,11 @@ function propertiesInherit(root: Root): void {
     const out: string[] = [];
     try {
       selectorParser((selectors) => {
-        selectors.each((sel) => {
+        selectors.each((whole) => {
+          // `:is(.markdown-preview-section, .markdown-rendered)`: each box.
+          for (const sel of subjectAlternatives(whole)) one(sel);
+        });
+        function one(sel: SSelector): void {
           if (
             OTHER_PANE.test(String(sel)) ||
             /metadata-|embed|callout/.test(String(sel))
@@ -325,8 +329,26 @@ function propertiesInherit(root: Root): void {
             )
           )
             return;
-          out.push(`:where(${String(sel).trim()} .metadata-container)`);
-        });
+          // The note's boxes as the converter knows them, so they're elided
+          // like any content wrapper (Quartz's block is outside the note):
+          // Blue Topaz's `:is(.markdown-preview-view,
+          // .markdown-rendered).is-readable-line-width` ancestor otherwise
+          // stays a condition no ancestor of the block meets.
+          const parts = all.map(
+            (c, i) =>
+              (i > 0
+                ? String(
+                    c.before!.value.trim()
+                      ? ` ${c.before!.value.trim()} `
+                      : " ",
+                  )
+                : "") +
+              (i === all.length - 1 || isNoteBox(c)
+                ? ".markdown-rendered"
+                : c.nodes.map(String).join("").trim()),
+          );
+          out.push(`:where(${parts.join("")} .metadata-container)`);
+        }
       }).processSync(rule.selector);
     } catch {
       return;
@@ -337,6 +359,32 @@ function propertiesInherit(root: Root): void {
     for (const d of decls) copy.append(d.clone({ important: false }));
     rule.after(copy);
   });
+}
+
+/** One of the note's own boxes, possibly as an `:is()` of them, with states. */
+function isNoteBox(c: Compound): boolean {
+  let box = false;
+  for (const n of c.nodes) {
+    if (n.type === "class") {
+      if (NOTE_BOXES.has(n.value)) box = true;
+      else if (!/^(mod|is|allow)-/.test(n.value)) return false;
+    } else if (n.type === "tag") {
+      if (n.value.toLowerCase() !== "div") return false;
+    } else if (n.type === "pseudo" && /^:(is|where)$/i.test(n.value)) {
+      const alts = (n as selectorParser.Pseudo).nodes;
+      if (
+        !alts.every(
+          (a) =>
+            a.nodes.length === 1 &&
+            a.nodes[0]!.type === "class" &&
+            NOTE_BOXES.has(a.nodes[0]!.value),
+        )
+      )
+        return false;
+      box = true;
+    } else if (!(n.type === "pseudo" && /^:not$/i.test(n.value))) return false;
+  }
+  return box;
 }
 
 /** Tags of the note's blocks, each in its own `div.el-*` in Obsidian. */
@@ -1174,6 +1222,24 @@ function rewriteBlockWrappers(sel: SSelector): boolean {
     const c = all[i]!;
     const found = wrapperNames(c);
     if (!found) continue;
+    // `div > .el-ul`: the div is the sizer, Quartz's note root, which the
+    // block already sits in (Baseline's `.markdown-rendered div > .el-ul > ul`).
+    const prev = all[i - 1];
+    if (
+      prev &&
+      isChild(c.before) &&
+      prev.nodes.length === 1 &&
+      prev.nodes[0]!.type === "tag" &&
+      prev.nodes[0]!.value.toLowerCase() === "div"
+    ) {
+      prev.nodes[0]!.remove();
+      c.before!.remove();
+      const last = c.nodes[c.nodes.length - 1]!;
+      const kept = pad([0, 0, 1]);
+      for (const q of kept.reverse()) last.parent!.insertAfter(last, q);
+      c.nodes.push(...kept.reverse());
+      changed = true;
+    }
     const next = all[i + 1];
     const spec = specificity({ nodes: found.nodes } as unknown as SSelector);
     const others = c.nodes.filter((n) => !found.nodes.includes(n));
@@ -1204,6 +1270,40 @@ function rewriteBlockWrappers(sel: SSelector): boolean {
         for (const q of nodesOf(":where(.markdown-preview-view > *)"))
           if (anchor) anchor.parent!.insertBefore(anchor, q);
           else target.parent!.insertAfter(target, q);
+      for (const n of found.nodes) n.remove();
+      next.before!.remove();
+      changed = true;
+      continue;
+    }
+    if (
+      next &&
+      isChild(next.before) &&
+      !nextTag &&
+      next.nodes.some((n) => !isPseudoElement(n))
+    ) {
+      // `.el-ul > *`, `div:is(.el-ul, .el-ol) > *` (Baseline): the wrapper's
+      // child is its block, not the block's children.
+      const what = nodesOf(`:where(${[...new Set(naturals)].join(", ")})`)[0]!;
+      const star = next.nodes.find((n) => n.type === "universal");
+      if (star) star.replaceWith(what);
+      else next.nodes[0]!.parent!.insertBefore(next.nodes[0]!, what);
+      const now = star
+        ? next.nodes.map((n) => (n === star ? what : n))
+        : [what, ...next.nodes];
+      const anchor = now.find(isPseudoElement);
+      const target = now.filter((n) => !isPseudoElement(n)).pop()!;
+      const moved = [...pad(spec), ...others];
+      if (
+        found.names.every(
+          (n) => BLOCK_WRAPPERS[n]!.block === BLOCK_WRAPPERS[n]!.natural[0],
+        )
+      )
+        moved.push(...nodesOf(":where(.markdown-preview-view > *)"));
+      for (const n of moved.reverse()) {
+        n.remove();
+        if (anchor) anchor.parent!.insertBefore(anchor, n);
+        else target.parent!.insertAfter(target, n);
+      }
       for (const n of found.nodes) n.remove();
       next.before!.remove();
       changed = true;

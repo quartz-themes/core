@@ -127,7 +127,7 @@ describe("selector rewriting", () => {
       conv(
         ":is(.markdown-preview-view,.markdown-rendered) .markdown-preview-sizer { letter-spacing: 2px }",
       ),
-      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px } :where(:is(.markdown-preview-view,.markdown-rendered) :not(.qt-0) .metadata-container) { letter-spacing: 2px }",
+      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px } :where(:not(.qt-0) :not(.qt-0) .metadata-container) { letter-spacing: 2px }",
     );
   });
 
@@ -326,6 +326,13 @@ describe("selector rewriting", () => {
       conv(".markdown-rendered { letter-spacing: 1px; padding: 4px }"),
       /:where\(:not\(\.qt-0\) \.metadata-container\) \{ letter-spacing: 1px \}/,
     );
+    // Through :is() (Blue Topaz's readable-width letter spacing).
+    assert.match(
+      conv(
+        ".markdown-preview-view :is(.markdown-preview-section, .markdown-rendered) { letter-spacing: 1px }",
+      ),
+      /\.metadata-container\)[^{]*\{ letter-spacing: 1px \}/,
+    );
     // As inherited values: the block's own rules win over !important (Techwear).
     assert.match(
       conv(".markdown-rendered { color: red !important }"),
@@ -400,6 +407,16 @@ describe("selector rewriting", () => {
     assert.equal(
       conv("div.el-p > p { margin: 0 }"),
       "p:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin: 0 }",
+    );
+    // A wrapper's any-child is its block (Baseline's lists after paragraphs).
+    assert.equal(
+      conv(".el-p + div:is(.el-ul, .el-ol) > * { margin-top: 20px }"),
+      ":where(p):not(.qt-0)+:where(ul, ol):not(.qt-0):not(qt-0):where(.markdown-preview-view > *) { margin-top: 20px }",
+    );
+    // The div a wrapper sits in is the sizer: Quartz's note root.
+    assert.equal(
+      conv(".markdown-rendered div > .el-ul > ul { margin-top: -5px }"),
+      ".markdown-rendered ul:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin-top: -5px }",
     );
     // Also as a descendant (Willemstad), and only the note's own blocks: the
     // footnotes' hr has no wrapper.
@@ -590,7 +607,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view.is-readable-line-width, .callout { padding-inline: 2em; padding-top: 1em; color: red }",
       ),
-      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red } :where(:not(.qt-0):not(.qt-0) .metadata-container) { color: red }",
+      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     // Descendants keep theirs.
     assert.equal(
