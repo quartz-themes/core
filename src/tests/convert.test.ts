@@ -233,17 +233,44 @@ describe("selector rewriting", () => {
       conv(".workspace-split.mod-horizontal { background: red }"),
       /--qt-bg/,
     );
-    // Variables on a box inherit into the note and the inner boxes: on
-    // <body>, ahead of body-level definitions, inner boxes ahead of outer.
+    // Variables on a box inherit into the note: on the Quartz element that
+    // stands for the box, inner boxes ahead of outer.
     assert.equal(
-      conv("body .app-container { --background-primary: red }"),
-      "body:not(#qt-0):not(.qt-0) { --background-primary: red }",
+      conv("body .app-container { --x: red }"),
+      "body #quartz-root:not(.qt-0) { --x: red }",
     );
     assert.match(
       conv(".view-content { --x: red }"),
-      /^body(:not\(#qt-0\)){9}:not\(.qt-0\) \{ --x: red \}$/,
+      /^body \.center(:not\(#qt-0\)){5}:not\(.qt-0\) \{ --x: red \}$/,
+    );
+    // Those a box's background uses also go to <body>, where the boxes are
+    // painted (Fantasy's translucent panes); others don't (Dracula + LYT's
+    // main-split border colour, which <body>'s --hr-color is built from).
+    assert.match(
+      conv(".app-container { --background-primary: red }"),
+      /^body #quartz-root[^}]*\}\s*body:not\(#qt-0\)/,
+    );
+    assert.doesNotMatch(
+      conv(
+        ".mod-root { --background-modifier-border: red } button { background: var(--background-modifier-border) }",
+      ),
+      /body:not\(#qt-0\)/,
+    );
+    assert.match(
+      conv(
+        ".app-container { --bp: red } .workspace-leaf { background: var(--bp) }",
+      ),
+      /body:not\(#qt-0\):not\(\.qt-0\) \{ --bp: red \}/,
     );
     assert.equal(conv(".mod-left-split .workspace-tabs { --x: red }"), "");
+    // Body classes from the selector's first compound, whatever whitespace
+    // the list left on them (Micro Mike).
+    assert.match(
+      conv(
+        ".a .x,\n.dtm08 .workspace-tabs .workspace-leaf { background: red }",
+      ),
+      /body\.dtm08:not\(\.qt-0\)[^{]*\{ --qt-bg3-color: red/,
+    );
     // A box's own :has() condition can't move to <body> (Fancy-a-Story).
     assert.doesNotMatch(
       conv(".markdown-reading-view:has(> .sci-fi) { --skin: on }"),
@@ -282,6 +309,14 @@ describe("selector rewriting", () => {
     assert.equal(
       conv("body.is-focused .x { color: red }"),
       "body:not(.qt-0) .x { color: red }",
+    );
+  });
+
+  test("an empty variable among a background's definitions (ITS Theme)", () => {
+    assert.doesNotThrow(() =>
+      conv(
+        ".a { --x:; } .b { --x: url(a.png) 0 0 / 10px; } body { background: var(--x) } .c { background: ; }",
+      ),
     );
   });
 
@@ -349,6 +384,15 @@ describe("selector rewriting", () => {
       flat(".callout { @media (max-width: 600px) { color: red } }"),
       flat("@media (max-width: 600px) { .callout { color: red } }"),
     );
+  });
+
+  test("inline headings stack, each alone in its block as in Obsidian", () => {
+    assert.match(
+      conv(".markdown-rendered h1 { display: inline }"),
+      /h1:where\(\.markdown-preview-view > \*\) \{ display: block; width: fit-content; margin-block: 0 !important \}/,
+    );
+    assert.doesNotMatch(conv("h2 { display: inline-block }"), /fit-content/);
+    assert.doesNotMatch(conv("span { display: inline }"), /fit-content/);
   });
 
   test("Obsidian's block wrappers (.el-*) are Quartz's blocks", () => {
@@ -825,7 +869,12 @@ describe("compose", () => {
     });
     assert.match(
       main,
-      /body { --font-text-size: 18px }[\s\S]*body(:not\(#qt-0\)){16} \{\n {2}--zoom-factor: 1;\n {2}--font-text-size: 16px;/,
+      /body { --font-text-size: 18px }[\s\S]*body(:not\(\.qt-0\)){32} \{\n {2}--zoom-factor: 1;\n {2}--font-text-size: 16px;/,
+    );
+    // Below a box's variables, which in Obsidian sit inside <body> (Mulled Wine).
+    assert.match(
+      conv(".app-container { --font-text-size: 14px }"),
+      /^body #quartz-root/,
     );
   });
 

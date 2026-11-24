@@ -51,11 +51,62 @@ export interface ResolvedStyleSettings {
 
 const SETTINGS_RE = /\/\*!?\s*@settings[\r\n]+?([\s\S]+?)\*\//g;
 
-/** The plugin's detect-indent: replace tabs with the file's space indent, else 4 spaces. */
+/**
+ * The plugin replaces tabs with the block's indent as `detect-indent` (7)
+ * finds it, when that's spaces, else with 4 spaces. detect-indent takes the
+ * most frequent change in indentation between lines, not the smallest indent:
+ * Micro Mike's block indents with tabs and has a few 4-space steps at 12+.
+ */
+function detectIndent(src: string): { type?: "s" | "t"; amount: number } {
+  const count = (ignoreSingleSpaces: boolean) => {
+    const used = new Map<string | undefined, [number, number]>();
+    let prevAmount = 0;
+    let prevType: string | undefined;
+    let key: string | undefined;
+    for (const line of src.split(/\n/g)) {
+      if (!line) continue;
+      const m = /^(?:( )+|\t+)/.exec(line);
+      if (m === null) {
+        prevAmount = 0;
+        prevType = "";
+        continue;
+      }
+      const amount = m[0].length;
+      const type = m[1] ? "s" : "t";
+      if (ignoreSingleSpaces && type === "s" && amount === 1) continue;
+      if (type !== prevType) prevAmount = 0;
+      prevType = type;
+      let weight = 0;
+      const diff = amount - prevAmount;
+      prevAmount = amount;
+      if (diff === 0) weight++;
+      else key = type + String(Math.abs(diff));
+      const e = used.get(key);
+      used.set(key, e === undefined ? [1, 0] : [e[0] + 1, e[1] + weight]);
+    }
+    return used;
+  };
+  let used = count(true);
+  if (used.size === 0) used = count(false);
+  let best: string | undefined;
+  let max = 0;
+  let maxWeight = 0;
+  for (const [k, [n, w]] of used)
+    if (n > max || (n === max && w > maxWeight)) {
+      max = n;
+      maxWeight = w;
+      best = k;
+    }
+  if (best === undefined) return { amount: 0 };
+  return { type: best[0] as "s" | "t", amount: Number(best.slice(1)) };
+}
+
 function detabbed(src: string): string {
-  const indents = [...src.matchAll(/^( +)\S/gm)].map((m) => m[1]!.length);
-  const unit = indents.length ? Math.min(...indents) : 4;
-  return src.replace(/\t/g, " ".repeat(unit || 4));
+  const { type, amount } = detectIndent(src);
+  return src.replace(
+    /\t/g,
+    type === "s" && amount ? " ".repeat(amount) : "    ",
+  );
 }
 
 export function parseStyleSettings(css: string): {

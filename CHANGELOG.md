@@ -58,13 +58,19 @@
   (`:not([data-type="markdown"])`) stay out. Obsidian's `.is-read-mode
 .markdown-preview-view` background no longer covers it: Obsidian 1.x marks the reading view
   with `data-mode="preview"`, so that rule is dead there.
+- Headings and other blocks a theme makes inline stack as in Obsidian, where each sits in its own
+  block wrapper: Adrenaline's headings ran together on one line.
 - Nested CSS (`body { .view-content { … } }`, `.callout { &[data-callout=tip] { … } }`, in 98
   themes) is converted: nested rules are flattened first, as the browser matches them. They used
   to pass through unconverted, matching Quartz's markup only by accident.
 - Variables a theme sets on the boxes around the note (`.app-container`, `.workspace`, the main
   split, the leaf, `.view-content`, in 136 themes) apply: in Obsidian they inherit into the note
-  and the boxes' backgrounds (Fantasy's translucent panes), and were dropped with the boxes. Ones
-  gated on the box's own `:has()` stay out, as that condition can't be checked on the page.
+  and the boxes' backgrounds (Fantasy's translucent panes), and were dropped with the boxes. They
+  go on Quartz's page or main column, which stand for those boxes, so variables `<body>` builds
+  from them keep `<body>`'s values as in Obsidian (Kiwi Mono's checkboxes). Ones
+  gated on the box's own `:has()` stay out, as that condition can't be checked on the page. A
+  pane rule's body classes keep working when the selector list put a line break before them
+  (Micro Mike's gradient panes).
 - The properties block inherits the note's text styles, as Obsidian's does from inside the note:
   a theme's letter spacing or font on `.markdown-rendered` (Cairn) reaches it, while rules for
   the block itself still win, also over the note's `!important` ones.
@@ -82,6 +88,10 @@
   unpainted (Claudian, Meridian), as no platform matched.
 - Rules for the reading view's sizer under `:is(.markdown-preview-view, .markdown-rendered)`
   apply to the note (Blue Topaz's letter spacing and line height).
+- Style Settings blocks indented with tabs and spaces mixed parse as the plugin parses them: it
+  replaces tabs with the indent `detect-indent` finds, the most common step between lines, not the
+  smallest indent. Micro Mike, Borealis, Panorama, Lemons, Velocity and Typomagical lost some or
+  all of their settings, and with them their defaults (Micro Mike's palette class).
 - Style Settings selects whose options aren't strings (AnuPpuccin's numeric font weights) are
   ignored, as Style Settings 1.0.9 ignores them.
 - Style Settings with an id that isn't a valid CSS variable name (Minimal's

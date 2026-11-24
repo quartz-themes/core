@@ -339,6 +339,79 @@ function propertiesInherit(root: Root): void {
   });
 }
 
+/** Tags of the note's blocks, each in its own `div.el-*` in Obsidian. */
+const WRAPPED_BLOCKS = /^(h[1-6]|p|ul|ol|blockquote|table|pre|hr)$/i;
+/**
+ * An inline box alone in a block wrapper, as a block box. Atomic inlines
+ * (`inline-block`, `inline-flex`…) are left as they are: their margins don't
+ * collapse in the wrapper's line box, which a block box can't match, and
+ * they already stack once they fill the line.
+ */
+const AS_WRAPPED: Record<string, string> = { inline: "block" };
+
+/**
+ * Obsidian wraps each of the note's blocks in a `div.el-*`, so a theme that
+ * makes headings inline (Adrenaline) still stacks them, one per wrapper; in
+ * Quartz they'd run together on one line. Top-level blocks a theme makes
+ * inline lay out as alone in a block: fitted to their content, without
+ * vertical margins.
+ */
+function wrappedInlineBlocks(root: Root): void {
+  root.walkRules((rule) => {
+    const parent = rule.parent as AtRule | undefined;
+    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
+    const display = (rule.nodes ?? []).filter(
+      (n): n is Declaration =>
+        n.type === "decl" &&
+        n.prop.toLowerCase() === "display" &&
+        n.value.trim().toLowerCase() in AS_WRAPPED,
+    );
+    if (!display.length) return;
+    const out: string[] = [];
+    try {
+      selectorParser((selectors) => {
+        selectors.each((sel) => {
+          const all = splitCompounds(sel);
+          const subject = all[all.length - 1]!;
+          const tag = subject.nodes.find((n) => n.type === "tag");
+          if (!tag || !WRAPPED_BLOCKS.test(tag.value)) return;
+          if (subject.nodes.some(isPseudoElement)) return;
+          const copy = sel.clone() as SSelector;
+          copy.append(
+            selectorParser.pseudo({
+              value: ":where",
+              nodes: [
+                selectorParser().astSync(".markdown-preview-view > *").first,
+              ],
+            }),
+          );
+          out.push(String(copy).trim());
+        });
+      }).processSync(rule.selector);
+    } catch {
+      return;
+    }
+    if (!out.length) return;
+    const copy = postcss.rule({ selector: out.join(", ") });
+    for (const d of display) {
+      const v = d.value.trim().toLowerCase();
+      copy.append(d.clone({ value: AS_WRAPPED[v]! }));
+      copy.append(
+        postcss.decl({
+          prop: "width",
+          value: "fit-content",
+          important: d.important,
+        }),
+      );
+      // An inline box's vertical margins don't move anything.
+      copy.append(
+        postcss.decl({ prop: "margin-block", value: "0", important: true }),
+      );
+    }
+    rule.after(copy);
+  });
+}
+
 /**
  * A selector whose subject has an `:is()` / `:where()` of compounds, once per
  * alternative (`.leaf :is(.view-header, .view-content)` paints `.view-content`).
@@ -445,7 +518,15 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
                   !classesOf(c).length)
               )
                 conds.push(n);
-          const head = `body${conds.map(String).join("")}`;
+          // Without the whitespace a node can carry (`\n.dtm08` after a comma
+          // in Micro Mike), which would make it a descendant.
+          const head = `body${conds
+            .map((n) => {
+              const c = n.clone() as SNode;
+              c.spaces = { before: "", after: "" };
+              return String(c);
+            })
+            .join("")}`;
           const own = specificity(selectorParser().astSync(head).first);
           const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
           if (!byLayer.has(layer)) byLayer.set(layer, []);
@@ -468,24 +549,82 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
         ),
       ),
     ].join(", ");
+  const painted = backgroundVars(root, [
+    ...APP_BOX_BACKGROUNDS,
+    ...copies.flatMap(([, , decls]) =>
+      decls.filter((d) => !d.prop.startsWith("--")).map((d) => d.value),
+    ),
+  ]);
+  const inside = (heads: [string, Spec][], el: string, ids: number) =>
+    selector(
+      heads.map(([head, spec]) => [`${head} ${el}`, spec]),
+      ids,
+    );
   for (const [rule, byLayer, decls] of copies)
     for (const [layer, heads] of byLayer) {
       const bg = postcss.rule({ selector: selector(heads) });
       for (const d of decls)
         if (!d.prop.startsWith("--")) bg.append(...layerDecls(d, layer, split));
       if (bg.nodes.length) rule.before(bg);
-      // Variables set on a box inherit into everything inside it, the note
-      // and the inner boxes' backgrounds included (Fantasy's translucent
-      // `--background-primary` on `.app-container`). On <body> they must
-      // beat body-level definitions, and inner boxes outer ones, as
-      // inheritance does: a few ids of padding, more the further in.
-      const vars = postcss.rule({
+      const own = decls.filter((d) => d.prop.startsWith("--"));
+      if (!own.length) continue;
+      // Variables set on a box inherit into everything inside it: the note,
+      // on the Quartz element that stands for the box (the main column for
+      // the main split and its leaf, the page for the app around the
+      // sidebars), so that body-level variables built on them don't see them
+      // (`--checkbox-size: var(--font-text-size)` against Kiwi Mono's
+      // reading-view font size). Inner boxes beat outer ones on the same
+      // element, as inheritance would: a few ids, more the further in.
+      const [el, top] =
+        layer <= MAIN_COLUMN_LAYER
+          ? [".center", MAIN_COLUMN_LAYER]
+          : ["#quartz-root", BODY_LAYER - 1];
+      const vars = postcss.rule({ selector: inside(heads, el, top - layer) });
+      for (const d of own) vars.append(d.clone());
+      rule.before(vars);
+      // The boxes' backgrounds are painted on <body> (Fantasy's translucent
+      // `--background-primary` on `.app-container`): the variables they use
+      // go there too, above body-level definitions.
+      const used = own.filter((d) => painted.has(d.prop));
+      if (!used.length) continue;
+      const onBody = postcss.rule({
         selector: selector(heads, BODY_LAYER - layer),
       });
-      for (const d of decls)
-        if (d.prop.startsWith("--")) vars.append(d.clone());
-      if (vars.nodes.length) rule.before(vars);
+      for (const d of used) onBody.append(d.clone());
+      rule.before(onBody);
     }
+}
+
+/** The main split (`.mod-root`) and the boxes inside it: Quartz's `.center`. */
+const MAIN_COLUMN_LAYER = 6;
+
+/** What Obsidian's app.css paints the boxes with (its own conversion is separate). */
+const APP_BOX_BACKGROUNDS = [
+  "var(--background-primary)",
+  "var(--background-secondary)",
+  "var(--titlebar-background)",
+  "var(--titlebar-background-focused)",
+  "var(--workspace-background-translucent)",
+];
+
+/** Variables the boxes' backgrounds use, directly or through other variables. */
+function backgroundVars(root: Root, values: string[]): Set<string> {
+  const refs = (v: string) =>
+    [...v.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]!);
+  const defs = new Map<string, string[]>();
+  root.walkDecls((d) => {
+    if (typeof d.value === "string" && d.prop.startsWith("--"))
+      defs.set(d.prop, [...(defs.get(d.prop) ?? []), ...refs(d.value)]);
+  });
+  const used = new Set(values.flatMap(refs));
+  const todo = [...used];
+  while (todo.length)
+    for (const r of defs.get(todo.pop()!) ?? [])
+      if (!used.has(r)) {
+        used.add(r);
+        todo.push(r);
+      }
+  return used;
 }
 
 /**
@@ -656,6 +795,7 @@ export function convertObsidianCss(
     stats.selectors.out += out.split(",").length;
   });
 
+  wrappedInlineBlocks(root);
   bodyBackgrounds(root, split);
 
   if (opts.resolveIcon) {

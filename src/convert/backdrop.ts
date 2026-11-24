@@ -102,6 +102,7 @@ export function splitBackgroundVars(root: Root): Set<string> {
       defs.get(d.prop)!.push(d);
     } else if (/^background$/i.test(d.prop)) {
       const layers = splitTop(d.value, /,/);
+      if (!layers.length) return;
       const lone = LONE_VAR.exec(layers[layers.length - 1]!.trim());
       if (lone) used.add(lone[1]!);
     }
@@ -131,6 +132,8 @@ export function splitBackgroundVars(root: Root): Set<string> {
         ? [`var(${lone[1]}${IMG})`, `var(${lone[1]}${COL})`]
         : [value, value];
     const layers = splitTop(value, /,/);
+    // An empty value (`--x:;`, ITS Theme) has no layers.
+    if (!layers.length) return ["none", "transparent"];
     const last = splitTop(layers[layers.length - 1]!, /[\s/]/);
     if (last.some((t) => IMAGE_FN.test(t)))
       return [imageTokens(layers).join(", "), "transparent"];

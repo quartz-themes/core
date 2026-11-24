@@ -46,6 +46,37 @@ describe("parse", () => {
     assert.equal(sections[0]?.id, "demo");
     assert.equal(sections[0]?.settings.length, 6);
   });
+
+  test("tabs mixed with a few space-indented lines (Micro Mike)", () => {
+    const block = [
+      "/* @settings",
+      "name: Mixed",
+      "id: mixed",
+      "settings:",
+      "\t-",
+      "\t\tid: palette",
+      "\t\ttype: class-select",
+      "\t\tdefault: b",
+      "\t\toptions:",
+      "\t\t\t- a",
+      "\t\t\t- b",
+      "\t-",
+      "\t\tid: align",
+      "\t\ttype: class-select",
+      "\t\tdefault: c",
+      "\t\toptions:",
+      "\t\t\t- ",
+      "                label: C",
+      "                value: c",
+      "            - ",
+      "                label: D",
+      "                value: d",
+      "*/",
+    ].join("\n");
+    const { sections, errors } = parseStyleSettings(block);
+    assert.deepEqual(errors, []);
+    assert.equal(sections[0]?.settings.length, 2);
+  });
 });
 
 describe("resolve", () => {

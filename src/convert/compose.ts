@@ -275,9 +275,11 @@ export interface ComposeInput {
  * style, at their defaults `--font-text-size: 16px` (Appearance → Font size).
  * An inline style beats every normal rule for `<body>`, so a theme's
  * `body { --font-text-size: 18px }` loses there; only `!important` wins, or a
- * rule on an element inside. The id padding gives this rule the same reach.
+ * rule on an element inside, such as the boxes around the note (Mulled Wine's
+ * `.app-container`). The class padding gives this rule that reach: above
+ * body rules, below the boxes' copies on `<body>`, which carry ids.
  */
-export const INLINE_BODY_CSS = `body${":not(#qt-0)".repeat(16)} {
+export const INLINE_BODY_CSS = `body${":not(.qt-0)".repeat(32)} {
   --zoom-factor: 1;
   --font-text-size: 16px;
   --indent-size: 4;
