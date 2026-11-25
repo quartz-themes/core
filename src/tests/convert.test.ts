@@ -1240,3 +1240,41 @@ describe("renamed elements", () => {
     );
   });
 });
+
+describe("property inputs", () => {
+  test("rules for Obsidian's property inputs reach Quartz's elements, with the same specificity", () => {
+    assert.equal(
+      conv("input.metadata-property-key-input { color: red }"),
+      ":is(input, span).metadata-property-key-input { color: red }",
+    );
+    assert.equal(
+      conv(
+        ".metadata-property-value input.metadata-input-number { color: red }",
+      ),
+      ".metadata-property-value :is(input, div).metadata-input-number { color: red }",
+    );
+    assert.equal(
+      conv(".metadata-property-key input { color: red }"),
+      ".metadata-property-key :is(input, :where(.metadata-property-key-input, .metadata-input)) { color: red }",
+    );
+    assert.equal(
+      conv(
+        '.metadata-property-value input[type="number"]:focus { color: red }',
+      ),
+      '.metadata-property-value :is(input[type="number"], :where(.metadata-input-number)):focus { color: red }',
+    );
+    assert.equal(
+      conv(".metadata-property-value input[type=date] { color: red }"),
+      ".metadata-property-value :is(input[type=date], :where(.mod-date)) { color: red }",
+    );
+  });
+
+  test("checkboxes, other inputs and inputs outside the properties are left alone", () => {
+    for (const sel of [
+      ".metadata-property input[type=checkbox]",
+      ".metadata-property-value > input.metadata-input-checkbox:checked",
+      ".search-input-container input",
+    ])
+      assert.equal(conv(`${sel} { color: red }`), `${sel} { color: red }`);
+  });
+});

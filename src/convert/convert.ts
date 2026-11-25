@@ -936,6 +936,7 @@ export function convertObsidianCss(
     try {
       out = selectorParser((selectors) => {
         if (splitMixedIs(selectors, { bodyState })) changed = true;
+        if (propertyInputs(selectors)) changed = true;
         if (wrapperInner(selectors)) changed = true;
         if (sizerDiv(selectors)) changed = true;
         selectors.each((sel) => {
@@ -1769,6 +1770,92 @@ function notStandIns(sel: SSelector): boolean {
       changed = true;
     }
   });
+  return changed;
+}
+
+/** Classes of Obsidian's properties block: an `input` under one is a property's. */
+const METADATA_SCOPE =
+  /^metadata-(container|content|properties|property|property-key|property-value)$/;
+
+/**
+ * Obsidian's property inputs, and Quartz's element for each. Obsidian edits
+ * properties in place: the key is `input.metadata-property-key-input`
+ * (`type="text"`), a number `input.metadata-input-number`, a date
+ * `input.metadata-input-text.mod-date` (`type="date"`, `"datetime-local"`).
+ * Quartz shows them read-only: the key in a span, numbers and dates in divs,
+ * with the same classes (text, lists and checkboxes are Obsidian's elements).
+ */
+const PROPERTY_INPUT_TYPES: Record<string, string> = {
+  text: ".metadata-property-key-input",
+  number: ".metadata-input-number",
+  date: ".mod-date",
+  "datetime-local": ".mod-date",
+};
+
+/**
+ * `input.metadata-property-key-input`, `.metadata-property-value input`: rules
+ * for Obsidian's property inputs reach Quartz's element for each, with the
+ * same specificity. `input.x` → `:is(input, span).x`; a classless `input`
+ * under the properties block → `:is(input, :where(…))`, by its `[type]` (the
+ * attribute moves into the `:is()`). Checkboxes are inputs in both.
+ */
+function propertyInputs(selectors: selectorParser.Root): boolean {
+  let changed = false;
+  for (const sel of selectors.nodes) {
+    let scoped = false;
+    sel.walkClasses((c) => {
+      if (METADATA_SCOPE.test(c.value)) scoped = true;
+    });
+    // Collected first: the replacement holds an `input` too.
+    const inputs: selectorParser.Tag[] = [];
+    sel.walkTags((tag) => {
+      if (tag.value.toLowerCase() === "input") inputs.push(tag);
+    });
+    for (const tag of inputs) {
+      const parent = tag.parent as SSelector | undefined;
+      if (!parent) continue;
+      const nodes = parent.nodes;
+      let from = parent.index(tag);
+      while (from > 0 && nodes[from - 1]!.type !== "combinator") from--;
+      let to = parent.index(tag);
+      while (to < nodes.length - 1 && nodes[to + 1]!.type !== "combinator")
+        to++;
+      const compound = nodes.slice(from, to + 1);
+      const classes = compound.flatMap((n) =>
+        n.type === "class" ? [n.value] : [],
+      );
+      let stand: string | undefined;
+      if (classes.includes("metadata-property-key-input"))
+        stand = ":is(input, span)";
+      else if (
+        !classes.includes("metadata-input-checkbox") &&
+        classes.some((c) => /^metadata-input(-text|-number)?$/.test(c))
+      )
+        stand = ":is(input, div)";
+      else if (!classes.length && scoped) {
+        const types = compound.filter(
+          (n): n is selectorParser.Attribute =>
+            n.type === "attribute" && n.attribute.toLowerCase() === "type",
+        );
+        if (types.length > 1) continue;
+        const type = types[0];
+        if (!type)
+          stand =
+            ":is(input, :where(.metadata-property-key-input, .metadata-input))";
+        else {
+          const value = type.value?.toLowerCase();
+          const where =
+            value && type.operator === "=" && PROPERTY_INPUT_TYPES[value];
+          if (!where) continue;
+          stand = `:is(input${String(type).trim()}, :where(${where}))`;
+          type.remove();
+        }
+      }
+      if (!stand) continue;
+      tag.replaceWith(...(nodesOf(stand) as never[]));
+      changed = true;
+    }
+  }
   return changed;
 }
 
