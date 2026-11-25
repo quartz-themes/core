@@ -69,6 +69,7 @@ interface StaticAsset {
 const FONT_ASSET_DIR = "quartz-themes/fonts";
 
 const log = (msg: string) => console.log(`[QuartzTheme] ${msg}`);
+let warnedWrappers = false;
 
 /**
  * An async transformer factory (Quartz 5.2+ awaits it). Declared here rather than taken from
@@ -200,6 +201,23 @@ export const QuartzTheme: AsyncTransformerPlugin<
     name: "QuartzTheme",
     textTransform(_ctx, src) {
       return src;
+    },
+    htmlPlugins() {
+      // Obsidian's per-block wrappers (`div.el-p > p`), which theme CSS spaces the
+      // note's blocks with, come from @quartz-community/obsidian-flavored-markdown
+      // (its `blockWrappers` option). By now every plugin's factory has run.
+      if (
+        (globalThis as Record<string, unknown>).__quartzBlockWrappers !==
+          true &&
+        !warnedWrappers
+      ) {
+        warnedWrappers = true;
+        console.warn(
+          `[QuartzTheme] Obsidian's block wrappers are off: notes' spacing won't match the theme. ` +
+            `Enable @quartz-community/obsidian-flavored-markdown with blockWrappers: true (the default).`,
+        );
+      }
+      return [];
     },
     externalResources() {
       const resources = { css, js, additionalHead: [], assets };

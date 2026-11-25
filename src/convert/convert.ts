@@ -458,100 +458,27 @@ function isNoteBox(c: Compound): boolean {
   return box;
 }
 
-/** Tags of the note's blocks, each in its own `div.el-*` in Obsidian. */
-const WRAPPED_BLOCKS = /^(h[1-6]|p|ul|ol|blockquote|table|pre|hr)$/i;
-/**
- * An inline box alone in a block wrapper, as a block box. Atomic inlines
- * (`inline-block`, `inline-flex`…) are left as they are: their margins don't
- * collapse in the wrapper's line box, which a block box can't match, and
- * they already stack once they fill the line.
- */
-const AS_WRAPPED: Record<string, string> = { inline: "block" };
-
-/**
- * Obsidian wraps each of the note's blocks in a `div.el-*`, so a theme that
- * makes headings inline (Adrenaline) still stacks them, one per wrapper; in
- * Quartz they'd run together on one line. Top-level blocks a theme makes
- * inline lay out as alone in a block: fitted to their content, without
- * vertical margins.
- */
-function wrappedInlineBlocks(root: Root): void {
-  root.walkRules((rule) => {
-    const parent = rule.parent as AtRule | undefined;
-    if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
-    const display = (rule.nodes ?? []).filter(
-      (n): n is Declaration =>
-        n.type === "decl" &&
-        n.prop.toLowerCase() === "display" &&
-        n.value.trim().toLowerCase() in AS_WRAPPED,
-    );
-    if (!display.length) return;
-    const out: string[] = [];
-    try {
-      selectorParser((selectors) => {
-        selectors.each((sel) => {
-          const all = splitCompounds(sel);
-          const subject = all[all.length - 1]!;
-          const tag = subject.nodes.find((n) => n.type === "tag");
-          if (!tag || !WRAPPED_BLOCKS.test(tag.value)) return;
-          if (subject.nodes.some(isPseudoElement)) return;
-          const copy = sel.clone() as SSelector;
-          copy.append(
-            selectorParser.pseudo({
-              value: ":where",
-              nodes: [
-                selectorParser().astSync(".markdown-preview-view > *").first,
-              ],
-            }),
-          );
-          out.push(String(copy).trim());
-        });
-      }).processSync(rule.selector);
-    } catch {
-      return;
-    }
-    if (!out.length) return;
-    const copy = postcss.rule({ selector: out.join(", ") });
-    for (const d of display) {
-      const v = d.value.trim().toLowerCase();
-      copy.append(d.clone({ value: AS_WRAPPED[v]! }));
-      copy.append(
-        postcss.decl({
-          prop: "width",
-          value: "fit-content",
-          important: d.important,
-        }),
-      );
-      // An inline box's vertical margins don't move anything.
-      copy.append(
-        postcss.decl({ prop: "margin-block", value: "0", important: true }),
-      );
-    }
-    rule.after(copy);
-  });
-}
-
-/** Inherited text properties a universal rule gives Obsidian's block wrappers. */
-const WRAPPER_INHERITED =
+/** Inherited text properties a universal rule gives Obsidian's sizer. */
+const SIZER_INHERITED =
   /^(color|font-family|font-weight|font-style|font-stretch|font-feature-settings|font-variation-settings|font-optical-sizing|font-variant(-[a-z]+)?|letter-spacing|word-spacing|line-height|text-shadow|text-transform|-webkit-font-smoothing|text-rendering)$/;
 
 /**
- * Obsidian's blocks sit in wrapper divs that only universal rules reach
- * (`* { font-family: "JetBrains Mono" }`), so what a block inherits, also
- * through app.css's `--h2-font: inherit`, is the universal rule's value. In
- * Quartz they sit in the note root, which app.css's `.markdown-preview-view {
- * font-family: var(--font-text) }` reaches more specifically (SpectrumPlus's
- * headings). The sizer stands in for the wrappers: it gets a copy of the
- * universal rule's inherited properties, above the note's own rules (an id),
+ * Quartz's note root is Obsidian's reading view and its sizer in one box.
+ * Obsidian's sizer is reached by universal rules only (`* { font-family:
+ * "JetBrains Mono" }`), so the text in it, also through app.css's `--h2-font:
+ * inherit`, has the universal rule's font. Quartz's root is the view too, which
+ * app.css's `.markdown-preview-view { font-family: var(--font-text) }` reaches
+ * more specifically (Museifu, SpectrumPlus). The root gets a copy of the
+ * universal rule's inherited properties, above the view's own rules (an id),
  * below any rule for the blocks, which are its children.
  */
-function universalWrappers(root: Root): void {
+function universalSizer(root: Root): void {
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
     const decls = (rule.nodes ?? []).filter(
       (n): n is Declaration =>
-        n.type === "decl" && WRAPPER_INHERITED.test(n.prop),
+        n.type === "decl" && SIZER_INHERITED.test(n.prop),
     );
     if (!decls.length) return;
     let sels: string[];
@@ -564,7 +491,7 @@ function universalWrappers(root: Root): void {
           if (
             subject.nodes.length !== 1 ||
             subject.nodes[0]!.type !== "universal" ||
-            // Only <body>/<html> conditions above it: `.callout *` is no wrapper.
+            // Only <body>/<html> conditions above it: `.callout *` is not the sizer.
             all.slice(0, -1).some((c) => {
               const top = c.nodes.some(
                 (n) =>
@@ -994,9 +921,8 @@ export function convertObsidianCss(
   const split = splitBackgroundVars(root);
   paneBackgrounds(root, split);
   propertiesInherit(root);
-  universalWrappers(root);
+  universalSizer(root);
 
-  const wrapperMargins: WrapperMargins = { cancel: new Map(), decls: [] };
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
@@ -1007,11 +933,11 @@ export function convertObsidianCss(
     const structuralSels: string[] = [];
     const contentRootSels: string[] = [];
     const mappedRootSels: string[] = [];
-    const blockWrapperSels: string[] = [];
     try {
       out = selectorParser((selectors) => {
         if (splitMixedIs(selectors, { bodyState })) changed = true;
-        if (wrapperAncestors(selectors)) changed = true;
+        if (wrapperInner(selectors)) changed = true;
+        if (sizerDiv(selectors)) changed = true;
         selectors.each((sel) => {
           stats.selectors.in++;
           const res = processSelector(sel, { bodyState }, true);
@@ -1024,7 +950,6 @@ export function convertObsidianCss(
             if (res.structural) structuralSels.push(sel.toString().trim());
             if (res.contentRoot) contentRootSels.push(sel.toString().trim());
             if (res.mappedRoot) mappedRootSels.push(sel.toString().trim());
-            if (res.blockWrapper) blockWrapperSels.push(sel.toString().trim());
           }
         });
       }).processSync(rule.selector, { lossless: false });
@@ -1048,7 +973,6 @@ export function convertObsidianCss(
       [structuralSels, (d) => LAYOUT_PROPS.test(d.prop) || isSizeContainer(d)],
       [contentRootSels, isContentRootLayout],
       [mappedRootSels, isMappedRootLayout],
-      [blockWrapperSels, isWrapperBox],
     ];
     let parts = [rule];
     for (const [sels, props] of guards)
@@ -1058,10 +982,6 @@ export function convertObsidianCss(
           stats.layoutStripped += res.stripped;
           return res.rules;
         });
-    if (blockWrapperSels.length)
-      parts = parts.flatMap((r) =>
-        wrapperPaint(r, blockWrapperSels, wrapperMargins),
-      );
     for (const m of out.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
       const c = m[1]!;
       if (c.startsWith("qt-") || quartzClasses.has(c)) continue;
@@ -1070,8 +990,6 @@ export function convertObsidianCss(
     stats.selectors.out += out.split(",").length;
   });
 
-  cancelWrapperMargins(wrapperMargins);
-  wrappedInlineBlocks(root);
   bodyBackgrounds(root, split);
 
   if (opts.resolveIcon) {
@@ -1144,203 +1062,8 @@ const isSizeContainer = (d: Declaration) =>
  */
 const CONTENT_ROOT_PROPS =
   /^(padding(-(top|right|bottom|left|inline|block)(-(start|end))?)?|overflow(-[xy])?|scrollbar-gutter)$/;
-/**
- * Obsidian's per-block wrapper divs never scroll, but in Quartz some top-level
- * blocks do: `.table-container` scrolls wide tables (Material Ocean's
- * `overflow: visible` on the wrappers would spill them off a phone).
- */
-const OVERFLOW_PROPS = /^overflow(-[xy])?$/;
 const MARGIN_PROPS =
   /^margin(-(top|right|bottom|left|inline|block)(-(start|end))?)?$/;
-
-/**
- * The box of Obsidian's per-block wrapper div, on the block itself in Quartz
- * (`.markdown-preview-section > div`, `.el-hr`): its padding moves the block
- * in, which on the block is margin (Discordian's `padding-left: 4rem` padded
- * the inside of callouts and code blocks), also vertically, the space themes
- * put between blocks with it (Hidontknow's `[class^="el-"] ~ [class^="el-"]
- * { padding-top }`): exact over the zero block margins such themes use, the
- * larger of the two rather than their sum otherwise. Its zero or `auto`
- * margins (`margin: 0 auto`) would replace the block's own, which in Obsidian
- * collapse through the wrapper: left out.
- */
-const WRAPPER_PADDING =
-  /^padding(-(top|right|bottom|left|inline|block)(-(start|end))?)?$/;
-/**
- * Zero margins between neighbouring wrappers stay: they take back the space
- * the theme's wrapper margins add (Adrenaline's `div.el-h1 + div.el-h2 {
- * margin-top: 0em }` against `div.el-h2 { margin-top: 4em }`).
- */
-const isSiblingRule = (d: Declaration) =>
-  /[+~]/.test((d.parent as Rule | undefined)?.selector ?? "");
-const isZeroSiblingMargin = (d: Declaration) =>
-  isSiblingRule(d) && /^0([a-z%]*)?$/i.test(d.value.trim());
-/**
- * In Obsidian such a zero margin only takes the wrapper's away: the block's
- * own still collapses through it (Brainhack's headings, its 20px apart;
- * Adrenaline's, inline, none). On the block itself it would replace the
- * block's own, so instead the wrapper margins it cancels leave those blocks
- * out.
- */
-interface WrapperMargins {
-  cancel: Map<string, string[]>;
-  decls: Declaration[];
-}
-function cancelWrapperMargins({ cancel, decls }: WrapperMargins): void {
-  for (const d of decls) {
-    const sels = cancel.get(d.prop);
-    const rule = d.parent as Rule | undefined;
-    if (!sels?.length || !rule || rule.type !== "rule") continue;
-    const not = `:where(:not(${sels.join(", ")}))`;
-    const selector = selectorParser()
-      .astSync(rule.selector)
-      .nodes.map((s) => {
-        const str = s.toString().trim();
-        return str.includes("::") ? str : `${str}${not}`;
-      })
-      .join(", ");
-    if (rule.nodes.every((n) => n === d || n.type === "comment"))
-      rule.selector = selector;
-    else {
-      rule.after(postcss.rule({ selector, nodes: [d.clone()] }));
-      d.remove();
-    }
-  }
-}
-const isWrapperBox = (d: Declaration) =>
-  OVERFLOW_PROPS.test(d.prop) ||
-  WRAPPER_PADDING.test(d.prop) ||
-  (MARGIN_PROPS.test(d.prop) && !isOffsetMargin(d) && !isSiblingRule(d));
-function wrapperAsBlock(d: Declaration): Declaration[] {
-  if (!WRAPPER_PADDING.test(d.prop)) return [];
-  const side = (prop: string, value: string) =>
-    /^0([a-z%]*)?$/i.test(value.trim()) ? [] : [d.clone({ prop, value })];
-  const which = d.prop.match(/^padding(?:-(.*))?$/)![1];
-  if (which !== undefined && which !== "inline" && which !== "block")
-    return side(`margin-${which}`, d.value);
-  const parts = d.value.trim().split(/\s+/);
-  // One value (`padding: var(--gap)`) is every side; several with functions
-  // in them can't be told apart by whitespace.
-  if (parts.length > 1 && parts.some((x) => x.includes("("))) return [];
-  if (which === "inline" || which === "block")
-    return [
-      ...side(`margin-${which}-start`, parts[0]!),
-      ...side(`margin-${which}-end`, parts[1] ?? parts[0]!),
-    ];
-  // padding: top right bottom left
-  const [top, right = top!, bottom = top!, left = right] = parts;
-  return [
-    ...side("margin-top", top!),
-    ...side("margin-right", right),
-    ...side("margin-bottom", bottom),
-    ...side("margin-left", left),
-  ];
-}
-/**
- * Its background, and the corners that round it, are behind the block
- * (Office Mock paints the page on the wrappers, `border-radius: 0`): the
- * block's own, the theme's and Obsidian's callout and code backgrounds and
- * corners, stay on top. Without specificity, and not on the blocks Obsidian
- * itself paints.
- */
-const WRAPPER_PAINT = (d: Declaration) =>
-  BACKGROUND_PROP.test(d.prop) ||
-  d.prop === "box-shadow" ||
-  /^border(-[a-z]+)*-radius$/.test(d.prop);
-const OWN_PAINT =
-  ":where(:not(.callout, pre, [data-rehype-pretty-code-figure]))";
-function wrapperPaint(
-  rule: Rule,
-  guarded: string[],
-  margins: WrapperMargins,
-): Rule[] {
-  // Its `em`s are the note's text size, not the block's (a heading's).
-  const sels = selectorParser()
-    .astSync(rule.selector)
-    .nodes.map((s) => s.toString().trim());
-  if (sels.every((s) => guarded.includes(s)))
-    for (const d of [...rule.nodes])
-      if (d.type === "decl" && MARGIN_PROPS.test(d.prop)) {
-        if (isZeroSiblingMargin(d)) {
-          const own = sels.filter((s) => !s.includes("::"));
-          margins.cancel.set(d.prop, [
-            ...(margins.cancel.get(d.prop) ?? []),
-            ...own,
-          ]);
-          d.remove();
-          continue;
-        }
-        d.value = d.value.replace(
-          /(^|[\s(,])(-?\d*\.?\d+)em\b/g,
-          "$1calc($2 * var(--font-text-size))",
-        );
-        margins.decls.push(d);
-      }
-  const decls = rule.nodes.filter(
-    (d): d is Declaration => d.type === "decl" && WRAPPER_PAINT(d),
-  );
-  if (!decls.length) return [rule];
-  const hit = selectorParser()
-    .astSync(rule.selector)
-    .nodes.map((s) => s.toString().trim())
-    .filter((s) => guarded.includes(s) && !s.includes("::"));
-  if (!hit.length) return [rule];
-  const paint = rule.cloneBefore({
-    selector: hit.map((s) => `:where(${s})${OWN_PAINT}`).join(", "),
-    nodes: [],
-  });
-  for (const d of decls) paint.append(d.clone());
-  const rest = selectorParser()
-    .astSync(rule.selector)
-    .nodes.map((s) => s.toString().trim())
-    .filter((s) => !hit.includes(s));
-  const rules: Rule[] = [paint];
-  if (rest.length) {
-    rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
-    rule.selector = hit.join(", ");
-  }
-  for (const d of decls) d.remove();
-  if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
-  else rules.push(rule);
-  return rules;
-}
-/**
- * The wrapper's side padding is inside its width (Discordian's `width:
- * var(--readable-line-length)` with `padding-left: 4rem`); as the block's
- * margins it would push a block of that width past the column: the block is
- * kept within what the padding leaves.
- */
-function capWrapperPadding(rule: Rule, decls: Declaration[]) {
-  const sides: string[] = [];
-  for (const d of decls) {
-    if (!WRAPPER_PADDING.test(d.prop)) continue;
-    const which = d.prop.match(/^padding(?:-(.*))?$/)![1];
-    const parts = d.value.trim().split(/\s+/);
-    if (which === "left" || which === "right") sides.push(d.value.trim());
-    else if (which === "inline") sides.push(parts[0]!, parts[1] ?? parts[0]!);
-    else if (which === undefined) {
-      if (parts.length > 1 && parts.some((x) => x.includes("("))) return;
-      const right = parts[1] ?? parts[0]!;
-      sides.push(right, parts[3] ?? right);
-    }
-  }
-  const used = sides.filter((v) => !/^0([a-z%]*)?$/i.test(v));
-  if (!used.length) return;
-  const cap = `calc(100% - ${used.join(" - ")})`;
-  const own = rule.nodes.filter(
-    (n): n is Declaration =>
-      n.type === "decl" && /^(max-width|max-inline-size)$/.test(n.prop),
-  );
-  const last = own.at(-1);
-  if (!last) rule.append({ prop: "max-width", value: cap });
-  else
-    last.value = /^[a-z-]+$/i.test(last.value.trim())
-      ? cap
-      : `min(${last.value.trim()}, ${cap})`;
-}
-const WRAPPER_AS_BLOCK = new Map<(d: Declaration) => boolean, boolean>([
-  [isWrapperBox, true],
-]);
 
 /**
  * A margin that offsets the content root. `auto` and 0 are kept: with a
@@ -1417,12 +1140,7 @@ function guardLayout(
     rules.push(rule.cloneBefore({ selector: rest.join(", ") }));
     rule.selector = hit.join(", ");
   }
-  const asBlock = WRAPPER_AS_BLOCK.get(strip);
-  if (asBlock) capWrapperPadding(rule, decls);
-  for (const d of decls) {
-    for (const r of asBlock ? wrapperAsBlock(d) : []) d.before(r);
-    d.remove();
-  }
+  for (const d of decls) d.remove();
   if (!rule.nodes.some((n) => n.type !== "comment")) rule.remove();
   else rules.push(rule);
   return { stripped: decls.length, rules };
@@ -1521,8 +1239,6 @@ interface SelectorResult {
   subjectIsRoot?: boolean;
   /** The subject is a content wrapper mapped onto the root (`.markdown-preview-sizer`). */
   mappedRoot?: boolean;
-  /** The subject is Obsidian's per-block wrapper div, i.e. a top-level block in Quartz. */
-  blockWrapper?: boolean;
   /** Nothing but elided wrappers: "any element", in an ancestor's `:is()`. */
   elidedOnly?: boolean;
 }
@@ -1593,226 +1309,6 @@ function rewriteExplorer(sel: SSelector): boolean | "drop" {
 }
 
 /**
- * Obsidian wraps each top-level block in a div named after it (`div.el-p > p`,
- * `div.el-table > table`); Quartz doesn't. Themes use the wrapper names to
- * mean "the block": `.el-table + div > h2` is "a heading after a table". Each
- * maps to the element Quartz renders for that block, the wrapper's own
- * selector replaced at the same specificity.
- */
-const BLOCK_WRAPPERS: Record<string, { block: string; natural: string[] }> = {
-  "el-p": { block: "p", natural: ["p"] },
-  "el-ul": { block: "ul", natural: ["ul"] },
-  "el-ol": { block: "ol", natural: ["ol"] },
-  "el-blockquote": { block: "blockquote", natural: ["blockquote"] },
-  "el-hr": { block: "hr", natural: ["hr"] },
-  "el-h1": { block: "h1", natural: ["h1"] },
-  "el-h2": { block: "h2", natural: ["h2"] },
-  "el-h3": { block: "h3", natural: ["h3"] },
-  "el-h4": { block: "h4", natural: ["h4"] },
-  "el-h5": { block: "h5", natural: ["h5"] },
-  "el-h6": { block: "h6", natural: ["h6"] },
-  // Quartz wraps tables in .table-container and highlighted code in a <figure>.
-  "el-table": { block: ".table-container", natural: ["table"] },
-  "el-pre": {
-    // No `figure` type selector: theme figure rules are kept off this figure.
-    block:
-      "[data-rehype-pretty-code-figure], :not([data-rehype-pretty-code-figure]) > pre",
-    natural: ["pre"],
-  },
-  // Callouts and raw HTML blocks.
-  "el-div": { block: "div", natural: ["div"] },
-};
-
-/** The wrapper names in a compound: `div.el-p`, or `div:is(.el-p, .el-table)`. */
-function wrapperNames(c: Compound): { names: string[]; nodes: SNode[] } | null {
-  const names: string[] = [];
-  const nodes: SNode[] = [];
-  for (const n of c.nodes) {
-    if (n.type === "class" && BLOCK_WRAPPERS[n.value]) {
-      names.push(n.value);
-      nodes.push(n);
-    } else if (
-      n.type === "attribute" &&
-      n.attribute === "class" &&
-      (n.operator === "^=" || n.operator === "*=") &&
-      /^el-/.test(n.value ?? "")
-    ) {
-      // `[class^="el-"]` (Hidontknow): the wrappers whose class it matches.
-      const v = n.value!;
-      const matched = Object.keys(BLOCK_WRAPPERS).filter((k) =>
-        n.operator === "^=" ? k.startsWith(v) : k.includes(v),
-      );
-      if (!matched.length) continue;
-      names.push(...matched);
-      nodes.push(n);
-    } else if (n.type === "tag" && n.value.toLowerCase() === "div")
-      nodes.push(n);
-    else if (
-      n.type === "pseudo" &&
-      (n.value === ":is" || n.value === ":where" || n.value === ":matches") &&
-      (n as selectorParser.Pseudo).nodes.length &&
-      (n as selectorParser.Pseudo).nodes.every(
-        (alt) =>
-          alt.nodes.length === 1 &&
-          alt.nodes[0]!.type === "class" &&
-          !!BLOCK_WRAPPERS[alt.nodes[0]!.value],
-      )
-    ) {
-      for (const alt of (n as selectorParser.Pseudo).nodes)
-        names.push(String(alt.nodes[0]!.value));
-      nodes.push(n);
-    }
-  }
-  return names.length ? { names, nodes } : null;
-}
-
-/** Selectors whose subject was a block wrapper (`.el-h2`), now the block. */
-const WRAPPER_SUBJECTS = new WeakSet<SSelector>();
-
-const bareDiv = (c: Compound) =>
-  c.nodes.length > 0 &&
-  c.nodes.every(
-    (n) =>
-      (n.type === "tag" && n.value.toLowerCase() === "div") ||
-      (n.type === "pseudo" && !isPseudoElement(n) && n.value !== ":is"),
-  ) &&
-  c.nodes.some((n) => n.type === "tag");
-
-function rewriteBlockWrappers(sel: SSelector): boolean {
-  let changed = false;
-  // Right to left, so removing compound i+1 keeps earlier indices valid.
-  for (let i = splitCompounds(sel).length - 1; i >= 0; i--) {
-    const all = splitCompounds(sel);
-    const c = all[i]!;
-    const found = wrapperNames(c);
-    if (!found) continue;
-    // `div > .el-ul`: the div is the sizer, Quartz's note root, which the
-    // block already sits in (Baseline's `.markdown-rendered div > .el-ul > ul`).
-    const prev = all[i - 1];
-    if (
-      prev &&
-      isChild(c.before) &&
-      prev.nodes.length === 1 &&
-      prev.nodes[0]!.type === "tag" &&
-      prev.nodes[0]!.value.toLowerCase() === "div"
-    ) {
-      prev.nodes[0]!.remove();
-      c.before!.remove();
-      const last = c.nodes[c.nodes.length - 1]!;
-      const kept = pad([0, 0, 1]);
-      for (const q of kept.reverse()) last.parent!.insertAfter(last, q);
-      c.nodes.push(...kept.reverse());
-      changed = true;
-    }
-    const next = all[i + 1];
-    const spec = specificity({ nodes: found.nodes } as unknown as SSelector);
-    const others = c.nodes.filter((n) => !found.nodes.includes(n));
-    const naturals = found.names.flatMap((n) => BLOCK_WRAPPERS[n]!.natural);
-    const nextTag = next?.nodes
-      .find((n) => n.type === "tag")
-      ?.value.toLowerCase();
-    if (
-      next &&
-      (isChild(next.before) ||
-        (isDescendantOrChild(next.before) && found.names[0] !== "el-div")) &&
-      found.names.length === 1 &&
-      nextTag &&
-      naturals.includes(nextTag)
-    ) {
-      // `div.el-p > p` → `p`: the wrapper's specificity and pseudos move onto
-      // it. Also `.el-hr hr` (Willemstad): the block is the wrapper's child.
-      const target = next.nodes[next.nodes.length - 1]!;
-      const anchor = next.nodes.find(isPseudoElement);
-      for (const n of [...pad(spec), ...others]) {
-        n.remove();
-        if (anchor) anchor.parent!.insertBefore(anchor, n);
-        else target.parent!.insertAfter(target, n);
-      }
-      // Only the note's own block, as only those have a wrapper (not the
-      // footnotes' hr, a callout's p).
-      if (BLOCK_WRAPPERS[found.names[0]!]!.block === nextTag)
-        for (const q of nodesOf(":where(.markdown-preview-view > *)"))
-          if (anchor) anchor.parent!.insertBefore(anchor, q);
-          else target.parent!.insertAfter(target, q);
-      for (const n of found.nodes) n.remove();
-      next.before!.remove();
-      changed = true;
-      continue;
-    }
-    if (
-      next &&
-      isChild(next.before) &&
-      !nextTag &&
-      next.nodes.some((n) => !isPseudoElement(n))
-    ) {
-      // `.el-ul > *`, `div:is(.el-ul, .el-ol) > *` (Baseline): the wrapper's
-      // child is its block, not the block's children.
-      const what = nodesOf(`:where(${[...new Set(naturals)].join(", ")})`)[0]!;
-      const star = next.nodes.find((n) => n.type === "universal");
-      if (star) star.replaceWith(what);
-      else next.nodes[0]!.parent!.insertBefore(next.nodes[0]!, what);
-      const now = star
-        ? next.nodes.map((n) => (n === star ? what : n))
-        : [what, ...next.nodes];
-      const anchor = now.find(isPseudoElement);
-      const target = now.filter((n) => !isPseudoElement(n)).pop()!;
-      const moved = [...pad(spec), ...others];
-      if (
-        found.names.every(
-          (n) => BLOCK_WRAPPERS[n]!.block === BLOCK_WRAPPERS[n]!.natural[0],
-        )
-      )
-        moved.push(...nodesOf(":where(.markdown-preview-view > *)"));
-      for (const n of moved.reverse()) {
-        n.remove();
-        if (anchor) anchor.parent!.insertBefore(anchor, n);
-        else target.parent!.insertAfter(target, n);
-      }
-      for (const n of found.nodes) n.remove();
-      next.before!.remove();
-      changed = true;
-      continue;
-    }
-    // Anywhere else, the wrapper is the block itself.
-    if (i === all.length - 1) WRAPPER_SUBJECTS.add(sel);
-    const blocks = [
-      ...new Set(found.names.map((n) => BLOCK_WRAPPERS[n]!.block)),
-    ];
-    const first = found.nodes[0]!;
-    for (const q of [...nodesOf(`:where(${blocks.join(", ")})`), ...pad(spec)])
-      first.parent!.insertBefore(first, q);
-    for (const n of found.nodes) n.remove();
-    // `.el-table + div > h2`: the sibling's own wrapper goes too.
-    const sib = all[i + 1];
-    const after = all[i + 2];
-    if (
-      sib &&
-      /^[~+]$/.test(sib.before?.value.trim() ?? "") &&
-      bareDiv(sib) &&
-      after &&
-      isChild(after.before)
-    ) {
-      const target = after.nodes[after.nodes.length - 1]!;
-      const sibSpec = specificity({
-        nodes: sib.nodes.filter((n) => n.type === "tag"),
-      } as unknown as SSelector);
-      const moved = [
-        ...pad(sibSpec),
-        ...sib.nodes.filter((n) => n.type !== "tag"),
-      ];
-      for (const n of moved) {
-        n.remove();
-        target.parent!.insertAfter(target, n);
-      }
-      for (const n of [...sib.nodes]) n.remove();
-      after.before!.remove();
-    }
-    changed = true;
-  }
-  return changed;
-}
-
-/**
  * `.markdown-preview-pusher` is an empty element Obsidian puts before a note's
  * first block, so `.markdown-preview-pusher + div` is the first block. Quartz
  * has no pusher: `pusher + X` → `X:first-child` (a pseudo-class for a class, same
@@ -1845,6 +1341,132 @@ function rewritePusher(sel: SSelector): boolean {
         ? [...nodesOf(":first-child"), ...pad([spec[0], spec[1] - 1, spec[2]])]
         : pad(spec);
     const anchor = next.nodes.find(isPseudoElement) ?? undefined;
+    const last = next.nodes[next.nodes.length - 1]!;
+    for (const q of add.reverse()) {
+      if (anchor) anchor.parent!.insertBefore(anchor, q);
+      else last.parent!.insertAfter(last, q);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Obsidian's sizer holds the note's blocks between UI: `div.markdown-preview-
+ * pusher` and `div.mod-header` before them, `div.mod-footer` after. Quartz's note
+ * root holds only the blocks, so a theme that counts the sizer's children
+ * (`sizer > div:nth-child(3)`, the first block; `sizer > :nth-child(2) ~ div`,
+ * every block; `sizer > div:last-child`, the footer) counts two fewer from the
+ * start and one fewer from the end. A count that lands on the UI matches
+ * nothing; the header followed by `~` / `+` is the start of the blocks.
+ */
+const SIZER_BEFORE: string[][] = [
+  ["markdown-preview-pusher"],
+  ["mod-header", "mod-ui"],
+];
+const SIZER_AFTER: string[][] = [["mod-footer", "mod-ui"]];
+const SIZER_CLASSES = ["markdown-preview-sizer", "markdown-preview-section"];
+
+/** `An+B` of a structural pseudo, or undefined (an `of S` filter, or unparsable). */
+function anPlusB(arg: string): [number, number] | undefined {
+  const v = arg.replace(/\s+/g, "").toLowerCase();
+  if (v === "odd") return [2, 1];
+  if (v === "even") return [2, 0];
+  const m = /^(?:([+-]?\d*)n)?([+-]?\d+)?$/.exec(v);
+  if (!m || v === "") return undefined;
+  const a =
+    m[1] === undefined
+      ? 0
+      : m[1] === "" || m[1] === "+"
+        ? 1
+        : m[1] === "-"
+          ? -1
+          : Number(m[1]);
+  return [a, m[2] ? Number(m[2]) : 0];
+}
+
+const formatAnB = (a: number, b: number) =>
+  a === 0
+    ? String(b)
+    : `${a === 1 ? "" : a === -1 ? "-" : a}n${b < 0 ? b : `+${b}`}`;
+
+function rewriteSizerChildren(sel: SSelector): "drop" | boolean {
+  let changed = false;
+  for (let i = splitCompounds(sel).length - 2; i >= 0; i--) {
+    const all = splitCompounds(sel);
+    const child = all[i + 1]!;
+    if (!isChild(child.before)) continue;
+    if (!classesOf(all[i]!).some((c) => SIZER_CLASSES.includes(c))) continue;
+    // Divs both sides: a count of another type (`h1:first-child`) is left alone.
+    const tag = child.nodes.find((n) => n.type === "tag");
+    if (tag && tag.value.toLowerCase() !== "div") continue;
+    if (classesOf(child).includes("markdown-preview-pusher")) continue;
+    const counts = child.nodes.filter(
+      (n): n is selectorParser.Pseudo =>
+        n.type === "pseudo" &&
+        /^:(first|last|only|nth|nth-last)-(child|of-type)$/i.test(n.value),
+    );
+    if (!counts.length) continue;
+    // Where in Obsidian's sizer the compound lands: a block, or the UI around it.
+    let ui: "before" | "after" | undefined;
+    let uiIndex = 0;
+    for (const n of counts) {
+      const name = n.value.toLowerCase();
+      if (/^:only-/.test(name)) return "drop";
+      const fromEnd = /^:(last|nth-last)-/.test(name);
+      const shift = fromEnd ? SIZER_AFTER.length : SIZER_BEFORE.length;
+      const ab: [number, number] | undefined = /^:(first|last)-/.test(name)
+        ? [0, 1]
+        : anPlusB(n.nodes.map(String).join(","));
+      if (!ab) continue;
+      const [a, b] = ab;
+      const nb = b - shift;
+      if (a === 0 && nb <= 0) {
+        ui = fromEnd ? "after" : "before";
+        uiIndex = b;
+        continue;
+      }
+      const ofType = /-of-type$/.test(name);
+      const fresh = selectorParser.pseudo({
+        value: `:nth-${fromEnd ? "last-" : ""}${ofType ? "of-type" : "child"}`,
+      });
+      fresh.append(
+        selectorParser.selector({
+          value: "",
+          nodes: [selectorParser.string({ value: formatAnB(a, nb) })],
+        } as never),
+      );
+      n.replaceWith(fresh);
+      changed = true;
+    }
+    if (!ui) continue;
+    const list = ui === "before" ? SIZER_BEFORE : SIZER_AFTER;
+    const el = list[ui === "before" ? uiIndex - 1 : list.length - uiIndex];
+    const fits =
+      el !== undefined &&
+      child.nodes.every(
+        (n) =>
+          counts.includes(n as selectorParser.Pseudo) ||
+          n.type === "combinator" ||
+          (n.type === "tag" && n.value.toLowerCase() === "div") ||
+          n.type === "universal" ||
+          (n.type === "class" && el.includes(n.value)),
+      );
+    const next = all[i + 2];
+    const comb = next?.before?.value.trim();
+    if (!fits || ui === "after" || !next || (comb !== "~" && comb !== "+"))
+      return "drop";
+    // `+` after the header is the first block; after the pusher, the header.
+    if (comb === "+" && uiIndex !== list.length) return "drop";
+    const spec = specificity(child as unknown as SSelector);
+    for (const n of [...child.nodes]) if (n.type !== "combinator") n.remove();
+    child.before!.remove();
+    next.before!.replaceWith(selectorParser.combinator({ value: ">" }));
+    const add =
+      comb === "+"
+        ? [...nodesOf(":first-child"), ...pad([spec[0], spec[1] - 1, spec[2]])]
+        : pad(spec);
+    const anchor = next.nodes.find(isPseudoElement);
     const last = next.nodes[next.nodes.length - 1]!;
     for (const q of add.reverse()) {
       if (anchor) anchor.parent!.insertBefore(anchor, q);
@@ -1936,66 +1558,249 @@ export function specificity(sel: SSelector | SNode): Spec {
 }
 
 /**
- * Does Obsidian's block wrapper div (`div.el-h2`) match this compound? Only
- * judged for `div`, `*` and `:not()` of other tags (`:not(:is(li, ul, ol))`).
+ * Obsidian's per-block wrappers hold their block directly (`div.el-table >
+ * table`); Quartz renders the same wrappers (rehype-obsidian) with an element
+ * of its own in between for some blocks: the scroll container around tables,
+ * the `<figure>` syntax highlighting puts code blocks in, the expand controls'
+ * box around diagrams. `.el-table > table` gets that element in between, with
+ * no specificity; where Quartz may render the block without it (code blocks
+ * without syntax highlighting), the original selector stays too.
  */
-function matchesWrapperDiv(c: Compound): boolean {
-  const otherTags = (sel: SSelector): boolean =>
-    sel.nodes.length === 1 &&
-    ((sel.nodes[0]!.type === "tag" &&
-      sel.nodes[0]!.value.toLowerCase() !== "div") ||
-      (sel.nodes[0]!.type === "pseudo" &&
-        /^:(is|where)$/i.test(sel.nodes[0]!.value) &&
-        (sel.nodes[0] as selectorParser.Pseudo).nodes.every(otherTags)));
-  return (
-    c.nodes.length > 0 &&
-    c.nodes.every(
-      (n) =>
-        (n.type === "tag" && n.value.toLowerCase() === "div") ||
-        n.type === "universal" ||
-        (n.type === "pseudo" &&
-          n.value === ":not" &&
-          (n as selectorParser.Pseudo).nodes.every(otherTags)),
-    )
+const WRAPPER_INNER: {
+  wrapper: string;
+  block: (c: Compound) => boolean;
+  between: string;
+  only: boolean;
+}[] = [
+  {
+    wrapper: "el-table",
+    block: (c) =>
+      c.nodes.some(
+        (n) => n.type === "tag" && n.value.toLowerCase() === "table",
+      ),
+    between: ":where(.table-container)",
+    only: true,
+  },
+  {
+    wrapper: "el-pre",
+    block: (c) =>
+      c.nodes.some((n) => n.type === "tag" && n.value.toLowerCase() === "pre"),
+    between: ":where([data-rehype-pretty-code-figure])",
+    only: false,
+  },
+  {
+    wrapper: "el-pre",
+    block: (c) => classesOf(c).includes("mermaid"),
+    between: ":where(.mermaid-diagram)",
+    only: true,
+  },
+];
+
+/** `.el-p`, `[class^="el-"]`: Obsidian's block wrapper. */
+const isWrapperCompound = (c: Compound) =>
+  classesOf(c).some((v) => /^el-[a-z0-9]+$/.test(v)) ||
+  c.nodes.some(
+    (n) =>
+      n.type === "attribute" &&
+      n.attribute === "class" &&
+      /^el-/.test(n.value ?? ""),
   );
-}
 
 /**
- * `.markdown-preview-section :not(:is(li, ul, ol)) > h2` (Micro Mike's
- * heading margins): in Obsidian the block wrapper is the element in between
- * for every top-level block, and Quartz has none, so top-level blocks never
- * match. When the wrapper would match, a copy of the selector without that
- * compound (its specificity moved onto the note) matches them; the original
- * still matches nested ones.
+ * `.markdown-rendered div > .el-p`: in Obsidian the div is the sizer, between
+ * the reading view and its blocks. Quartz's note root is both, so the rule also
+ * goes to the root's blocks (`.markdown-rendered > .el-p`, the div's specificity
+ * kept). The original stays for blocks of an embedded note, in the embed's div.
  */
-function wrapperAncestors(selectors: selectorParser.Root): boolean {
+function sizerDiv(selectors: selectorParser.Root): boolean {
   let changed = false;
   for (const sel of [...selectors.nodes]) {
     const all = splitCompounds(sel);
     for (let i = 1; i < all.length - 1; i++) {
-      const box = all[i - 1]!;
-      const d = all[i]!;
+      const div = all[i]!;
+      if (!isDescendantOrChild(div.before)) continue;
+      if (!isChild(all[i + 1]!.before) || !isWrapperCompound(all[i + 1]!))
+        continue;
+      if (!classesOf(all[i - 1]!).some((v) => READING_VIEW_CLASSES.has(v)))
+        continue;
       if (
-        !classesOf(box).some(
-          (k) => CONTENT_WRAPPERS.has(k) || CONTENT_ROOT_CLASSES.includes(k),
-        ) ||
-        d.before?.value.trim() !== "" ||
-        !matchesWrapperDiv(d) ||
-        // `div > .el-ul`: the div is the sizer, rewriteBlockWrappers' case.
-        wrapperNames(all[i + 1]!) !== null ||
-        !/^[\s>]*$/.test(all[i + 1]!.before?.value ?? "")
+        !div.nodes.length ||
+        !div.nodes.every(
+          (n) =>
+            n.type === "combinator" ||
+            (n.type === "tag" && n.value.toLowerCase() === "div") ||
+            n.type === "universal",
+        )
       )
         continue;
       const copy = sel.clone() as SSelector;
-      const parts = splitCompounds(copy);
-      const spec = specificity({
-        nodes: parts[i]!.nodes,
-      } as unknown as SSelector);
-      const last = parts[i - 1]!.nodes.at(-1)!;
-      for (const q of pad(spec).reverse()) last.parent!.insertAfter(last, q);
-      for (const n of parts[i]!.nodes) n.remove();
-      parts[i]!.before!.remove();
+      const call = splitCompounds(copy);
+      const cdiv = call[i]!;
+      const spec = specificity(cdiv as unknown as SSelector);
+      for (const n of [...cdiv.nodes]) if (n.type !== "combinator") n.remove();
+      cdiv.before!.remove();
+      const prev = call[i - 1]!;
+      const anchor = prev.nodes[prev.nodes.length - 1]!;
+      for (const q of pad(spec).reverse())
+        anchor.parent!.insertAfter(anchor, q);
       selectors.insertAfter(sel, copy);
+      changed = true;
+      break;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Quartz's element between a wrapper and its block, by the wrapper it's in
+ * (`undefined`: a wrapper of any block, `[class^="el-"]`, the sizer's `div`).
+ */
+const QUARTZ_INNER: { wrappers: string[]; between: string; block: string }[] = [
+  {
+    wrappers: ["el-pre"],
+    between: ":where([data-rehype-pretty-code-figure])",
+    block: "",
+  },
+  { wrappers: ["el-table"], between: ":where(.table-container)", block: "" },
+  {
+    wrappers: ["el-pre"],
+    between: ":where(.mermaid-diagram)",
+    block: ":where(.mermaid)",
+  },
+];
+
+/** A child compound that names no element: `*`, `:first-child`. */
+const isAnyChild = (c: Compound) =>
+  c.nodes.every(
+    (n) =>
+      n.type === "combinator" ||
+      n.type === "universal" ||
+      (n.type === "pseudo" &&
+        (isPseudoElement(n) ||
+          /^:(first|last|only|nth|nth-last)-(child|of-type)$/i.test(n.value))),
+  );
+
+/**
+ * `.el-pre > *` / `[class^="el-"] > *`: in Obsidian the wrapper's child is the
+ * block; in Quartz it's an element of Quartz's around the block (syntax
+ * highlighting's figure, the table's scroll container, the diagram's box). The
+ * rule goes past it to the block, and no longer to it (Hidontknow's blocks lose
+ * their margins: the code block's `pre` too).
+ */
+function wrapperAnyChild(sel: SSelector, all: Compound[], i: number): boolean {
+  const wrapper = all[i]!;
+  const next = all[i + 1]!;
+  if (!isChild(next.before) || !isAnyChild(next)) return false;
+  const classes = classesOf(wrapper);
+  const named = classes.filter((v) => /^el-[a-z0-9]+$/.test(v));
+  const isSizerDiv =
+    i > 0 &&
+    isChild(wrapper.before) &&
+    classesOf(all[i - 1]!).some((v) => SIZER_CLASSES.includes(v)) &&
+    wrapper.nodes.every(
+      (n) =>
+        n.type === "combinator" ||
+        n.type === "universal" ||
+        (n.type === "tag" && n.value.toLowerCase() === "div"),
+    );
+  if (!named.length && !isWrapperCompound(wrapper) && !isSizerDiv) return false;
+  const inner = QUARTZ_INNER.filter(
+    (q) => !named.length || q.wrappers.some((w) => named.includes(w)),
+  );
+  if (!inner.length) return false;
+  const selectors = sel.parent as unknown as selectorParser.Root;
+  const at = sel.index(next.before!);
+  const addTo = (s: SSelector, at: number, nodes: SNode[]) => {
+    const compound = splitCompounds(s)[at]!;
+    const anchor = compound.nodes.find(isPseudoElement);
+    const last = compound.nodes[compound.nodes.length - 1]!;
+    for (const q of [...nodes].reverse()) {
+      if (anchor) anchor.parent!.insertBefore(anchor, q);
+      else last.parent!.insertAfter(last, q);
+    }
+  };
+  let after: SSelector = sel;
+  for (const q of inner) {
+    const copy = sel.clone() as SSelector;
+    const comb = copy.at(at) as selectorParser.Combinator;
+    const child = selectorParser().astSync("a > b").first.nodes[1]!;
+    for (const n of [...nodesOf(q.between), child.clone() as SNode].reverse())
+      copy.insertAfter(comb, n as selectorParser.Combinator);
+    if (q.block) addTo(copy, i + 2, nodesOf(q.block));
+    selectors.insertAfter(after, copy);
+    after = copy;
+  }
+  addTo(
+    sel,
+    i + 1,
+    nodesOf(
+      `:where(:not(${inner.map((q) => q.between.slice(7, -1)).join(", ")}))`,
+    ),
+  );
+  return true;
+}
+
+/** Quartz's element in place of Obsidian's block as a child: `table` → its container. */
+const QUARTZ_STAND_IN: Record<string, string> = {
+  table: ":where(.table-container)",
+  pre: ":where([data-rehype-pretty-code-figure])",
+};
+
+/**
+ * `div:has(> :not(h2, table))`: a child that isn't a table. In Quartz the
+ * table's child stand-in is its scroll container (code: syntax highlighting's
+ * figure), which isn't one either; the `:not()` excludes it too, with the same
+ * specificity (Seamless View's space above a heading after a table).
+ */
+function notStandIns(sel: SSelector): boolean {
+  let changed = false;
+  sel.walkPseudos((p) => {
+    if (p.value.toLowerCase() !== ":not") return;
+    const parent = p.parent;
+    if (!parent) return;
+    let prev = parent.at(parent.index(p) - 1);
+    while (prev && prev.type !== "combinator")
+      prev = parent.at(parent.index(prev) - 1);
+    if (!isChild(prev as selectorParser.Combinator | undefined)) return;
+    const args = p.nodes.map((a) => String(a).trim().toLowerCase());
+    for (const [tag, standIn] of Object.entries(QUARTZ_STAND_IN)) {
+      if (!args.includes(tag) || args.includes(standIn)) continue;
+      p.append(selectorParser().astSync(standIn).first.clone() as never);
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function wrapperInner(selectors: selectorParser.Root): boolean {
+  let changed = false;
+  for (const sel of [...selectors.nodes]) {
+    if (notStandIns(sel)) changed = true;
+    const all = splitCompounds(sel);
+    for (let i = all.length - 2; i >= 0; i--) {
+      const next = all[i + 1]!;
+      if (!isChild(next.before)) continue;
+      const inner = WRAPPER_INNER.find(
+        (w) => classesOf(all[i]!).includes(w.wrapper) && w.block(next),
+      );
+      if (!inner) {
+        if (wrapperAnyChild(sel, all, i)) {
+          changed = true;
+          break;
+        }
+        continue;
+      }
+      const copy = sel.clone() as SSelector;
+      const at = sel.index(next.before!);
+      const comb = copy.at(at) as selectorParser.Combinator;
+      const child = selectorParser().astSync("a > b").first.nodes[1]!;
+      for (const n of [
+        ...nodesOf(inner.between),
+        child.clone() as SNode,
+      ].reverse())
+        copy.insertAfter(comb, n as selectorParser.Combinator);
+      if (inner.only) sel.replaceWith(copy);
+      else selectors.insertAfter(sel, copy);
       changed = true;
       break;
     }
@@ -2054,8 +1859,9 @@ function processSelector(
   // .markdown-source-view) p`): a wrapper there is elided, not a wrapper subject.
   inSubject = true,
 ): SelectorResult {
-  const wrappers = rewriteBlockWrappers(sel);
-  const pusher = rewritePusher(sel) || wrappers;
+  const sizerChildren = rewriteSizerChildren(sel);
+  if (sizerChildren === "drop") return { drop: "staticFalse" };
+  const pusher = rewritePusher(sel) || sizerChildren;
   const properties = rewriteProperties(sel) || pusher;
   const explorer = rewriteExplorer(sel);
   if (explorer === "drop") return { drop: "staticFalse" };
@@ -2104,7 +1910,6 @@ function processSelector(
   // `.markdown-preview-sizer > div` → `:where(.markdown-preview-view):not(.qt-0) > div`.
   // Right to left, so merging compound i into i-1 leaves earlier indices valid.
   const subjectMapped = toContentRoot(results[results.length - 1]!);
-  let blockSubject = false;
   for (let i = compounds.length - 1; i >= 0; i--) {
     const r = results[i]!;
     if (!toContentRoot(r)) continue;
@@ -2136,59 +1941,6 @@ function processSelector(
       );
     r.named = r.concrete = true;
     changed = anyConcrete = true;
-
-    // Obsidian wraps every block in a div (`div.el-h1 > h1`); Quartz doesn't.
-    // `sizer > div` is "a top-level block" → any child of the root;
-    // `sizer > div h1` is "a heading in the note" → the wrapper is elided.
-    const rootIdx = prevIsRoot ? i - 1 : i;
-    const wrapper = splitCompounds(sel)[rootIdx + 1];
-    if (!wrapper || !isChild(wrapper.before)) continue;
-    // Only a bare `div` / `*`, optionally with pseudos (`:has(img)`, `::before`).
-    const bareWrapper = (c: Compound) =>
-      c.nodes.every(
-        (n) =>
-          (n.type === "tag" && n.value.toLowerCase() === "div") ||
-          n.type === "universal" ||
-          n.type === "pseudo",
-      );
-    if (!bareWrapper(wrapper)) continue;
-    const unwrap = (c: Compound) => {
-      for (const n of c.nodes) {
-        if (n.type === "tag") {
-          for (const p of pad([0, 0, 1])) n.parent!.insertBefore(n, p);
-          n.remove();
-        } else if (n.type === "universal") n.remove();
-      }
-    };
-    unwrap(wrapper);
-    // Its siblings are block wrappers too: `sizer > :nth-child(2) ~ div`.
-    const isSibling = (c?: selectorParser.Combinator) =>
-      c !== undefined && /^[~+]$/.test(c.value.trim());
-    let last = rootIdx + 1;
-    for (
-      let j = rootIdx + 2, all = splitCompounds(sel);
-      j < all.length && isSibling(all[j]!.before) && bareWrapper(all[j]!);
-      j++
-    )
-      unwrap(all[(last = j)]!);
-    const fresh = splitCompounds(sel);
-    if (last === fresh.length - 1) blockSubject = true;
-    const w = fresh[rootIdx + 1]!;
-    const isPadding = (n: SNode) =>
-      n.type === "pseudo" && n.value === ":not" && /qt-0\)$/.test(String(n));
-    if (
-      rootIdx + 1 < fresh.length - 1 &&
-      !isSibling(fresh[rootIdx + 2]?.before) &&
-      w.nodes.every(isPadding)
-    ) {
-      // Elide: move its specificity onto the root compound, drop `> wrapper`.
-      const rootLast = fresh[rootIdx]!.nodes.at(-1)!;
-      for (const n of [...w.nodes].reverse()) {
-        n.remove();
-        rootLast.parent!.insertAfter(rootLast, n);
-      }
-      w.before!.remove();
-    }
   }
 
   // Bare form controls and headings: in Quartz they would hit chrome.
@@ -2247,7 +1999,6 @@ function processSelector(
     subjectIsRoot,
     elidedOnly: anyElided && !anyConcrete,
     mappedRoot: top && !subjectIsRoot && subjectMapped,
-    blockWrapper: top && (blockSubject || WRAPPER_SUBJECTS.has(sel)),
   };
 }
 
