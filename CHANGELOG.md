@@ -21,6 +21,21 @@
   styles.
 - Obsidian's `.card-title` (its own UI cards) no longer styles Quartz's search results and
   bases cards, which use the same class.
+- The note's own box (`.markdown-preview-view`, `.markdown-rendered`) is painted behind the
+  page, as the pane-wide box it is in Obsidian, under the column Quartz's content stands
+  for (`.markdown-preview-sizer`). A grid, dots or glow drawn around a paper sheet no
+  longer paints over the sheet (Graphite Island Spectrum, Waypoint Atlas, Yosuke Glass).
+- The properties block, which Quartz renders above the note, gets the note sheet's colour
+  behind it as in Obsidian. It beats app.css's transparent block, still loses to the
+  theme's own rules, and works with `color-mix()` colours too.
+- Letter and word spacing set on the boxes around the whole app (`.workspace`,
+  `.app-container`) reach the note, as in Obsidian (Nytharael, Cordyceps).
+- The reset that undoes Quartz's base styles sits below a theme's own cascade layers, so a
+  theme's `@layer base` (Tailwind) styles apply: Auger's code font, checkbox icons and
+  footnote size.
+- Bare `details` and `summary` rules, `details[open]` included, apply to foldable blocks in
+  notes only. Quartz's properties block is a `<details>`, which Obsidian's bare rules don't
+  reach (Copper Rose, Camena, Majesty, Swak).
 - Obsidian's external-link icon (`public/external-link.svg`, a file shipped inside the app)
   is inlined into the bundled app.css; it 404'd on Quartz sites. The bundled app.css is
   regenerated with this release's converter.

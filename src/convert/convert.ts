@@ -262,12 +262,18 @@ function backdropLayer(c: Compound): number {
   if (
     classes.some(
       (k) =>
-        !WRAPPER_CLASSES.has(k) && !/^(mod|is)-/.test(k) && k !== "mod-root",
+        !WRAPPER_CLASSES.has(k) &&
+        !CONTENT_ROOT_CLASSES.includes(k) &&
+        !/^(mod|is|allow|show)-/.test(k) &&
+        k !== "mod-root",
     )
   )
     return -1;
   for (let i = 0; i < BACKDROP_LAYERS.length; i++)
     if (classes.includes(BACKDROP_LAYERS[i]!)) return i;
+  // The note box carries `.markdown-rendered` too (Forgotten Golden Sanctuary's
+  // `.markdown-rendered { background-color: transparent }` clears its colour).
+  if (classes.includes("markdown-rendered")) return NOTE_BOX_LAYER;
   // A bare `.workspace-split` matches the main split too (`.workspace-split
   // .mod-vertical.mod-root`); horizontal ones are sidebars or nested splits.
   if (
@@ -297,6 +303,11 @@ const NOTE_BOXES = new Set([
  * itself wins, as over inheritance.
  */
 function propertiesInherit(root: Root): void {
+  // The note boxes' colours, behind the block in Obsidian: ahead of the theme's
+  // rules, at the specificity of app.css's transparent `.metadata-container`
+  // (which they beat, coming after it) and below the theme's own rules for
+  // the block (which come after them).
+  const colours: postcss.Rule[] = [];
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
@@ -311,6 +322,8 @@ function propertiesInherit(root: Root): void {
     });
     if (!decls.length) return;
     const out: string[] = [];
+    // For the colours: the conditions outside the note's boxes (body toggles).
+    const conds: string[] = [];
     try {
       selectorParser((selectors) => {
         selectors.each((whole) => {
@@ -357,17 +370,49 @@ function propertiesInherit(root: Root): void {
                 : c.nodes.map(String).join("").trim()),
           );
           out.push(`:where(${parts.join("")} .metadata-container)`);
+          const outer = all
+            .slice(0, -1)
+            .filter((c) => !isNoteBox(c))
+            .map((c) => c.nodes.map(String).join("").trim());
+          conds.push(
+            outer.length
+              ? `:where(${outer.join(" ")}) .metadata-container`
+              : ".metadata-container",
+          );
         }
       }).processSync(rule.selector);
     } catch {
       return;
     }
     if (!out.length) return;
-    const copy = postcss.rule({ selector: out.join(", ") });
+    const inherited = decls.filter((d) => INHERITED.test(d.prop));
+    const colour = decls.filter((d) => !INHERITED.test(d.prop));
     // Inherited values never carry !important: the block's own rules win.
-    for (const d of decls) copy.append(d.clone({ important: false }));
-    rule.after(copy);
+    if (inherited.length) {
+      const copy = postcss.rule({ selector: out.join(", ") });
+      for (const d of inherited) copy.append(d.clone({ important: false }));
+      rule.after(copy);
+    }
+    if (colour.length) {
+      const atTop = rule.parent?.type === "root";
+      const copy = postcss.rule({
+        selector: [...new Set(atTop ? conds : out)].join(", "),
+      });
+      for (const d of colour) copy.append(d.clone({ important: false }));
+      if (atTop) colours.push(copy);
+      else rule.after(copy);
+    }
   });
+  if (!colours.length) return;
+  const first = root.nodes.find(
+    (n) =>
+      !(
+        n.type === "atrule" &&
+        /^(charset|import|layer|namespace)$/i.test(n.name)
+      ),
+  );
+  if (first) first.before(colours);
+  else root.append(colours);
 }
 
 /** A note box's background colour, as `background-color`. */
@@ -375,13 +420,15 @@ function noteBoxColour(d: Declaration): Declaration | null {
   if (d.prop === "background-color") return d;
   if (d.prop !== "background") return null;
   const v = d.value.trim();
-  // A single colour or variable; layered backgrounds, images and positions
-  // would need the shorthand parsed.
-  if (
-    /[\s,]/.test(v.replace(/\([^()]*\)/g, "()")) ||
-    /url\(|gradient\(/i.test(v)
-  )
-    return null;
+  // A single colour or variable (`color-mix(in srgb, var(--x) 90%, transparent)`
+  // included: nested parentheses collapse); layered backgrounds, images and
+  // positions would need the shorthand parsed.
+  let flat = v;
+  for (let prev = ""; prev !== flat;) {
+    prev = flat;
+    flat = flat.replace(/\([^()]*\)/g, "");
+  }
+  if (/[\s,]/.test(flat) || /url\(|gradient\(/i.test(v)) return null;
   return d.clone({ prop: "background-color" });
 }
 
@@ -586,6 +633,9 @@ function subjectAlternatives(sel: SSelector): SSelector[] {
  */
 function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
   const copies: [Rule, Map<number, [string, Spec][]>, Declaration[]][] = [];
+  // Rules for the note's own box: their selectors, and which of them are only that box
+  // (their backgrounds leave the content root, which stands for the column).
+  const noteBox = new Map<Rule, { all: string[]; box: Set<string> }>();
   root.walkRules((rule) => {
     const parent = rule.parent as AtRule | undefined;
     if (parent?.type === "atrule" && /keyframes$/i.test(parent.name)) return;
@@ -602,9 +652,19 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
       selectorParser((selectors) => {
         selectors.each((whole) => {
           const spec = specificity(whole);
-          for (const sel of subjectAlternatives(whole)) paint(sel, spec);
+          const text = String(whole).trim();
+          let alts = 0;
+          let boxes = 0;
+          for (const sel of subjectAlternatives(whole)) {
+            alts++;
+            if (paint(sel, spec) === NOTE_BOX_LAYER) boxes++;
+          }
+          const entry = noteBox.get(rule) ?? { all: [], box: new Set() };
+          entry.all.push(text);
+          if (alts && boxes === alts) entry.box.add(text);
+          noteBox.set(rule, entry);
         });
-        function paint(sel: SSelector, spec: Spec): void {
+        function paint(sel: SSelector, spec: Spec): number | void {
           if (OTHER_PANE.test(String(sel))) return;
           const all = splitCompounds(sel);
           const subject = all[all.length - 1]!;
@@ -621,6 +681,31 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
             return;
           const layer = backdropLayer(subject);
           if (layer < 0) return;
+          // The note's own box only in the main pane: not inside an embed, a
+          // popover or another view (`.markdown-embed .markdown-preview-view`),
+          // whose classes aren't boxes, wrappers or <body>'s.
+          if (
+            layer === NOTE_BOX_LAYER &&
+            all
+              .slice(0, -1)
+              .some(
+                (c, i) =>
+                  backdropLayer(c) < 0 &&
+                  !(
+                    i === 0 &&
+                    c.nodes.some(
+                      (n) =>
+                        (n.type === "tag" && /^(body|html)$/i.test(n.value)) ||
+                        (n.type === "class" &&
+                          /^theme-(dark|light)$/.test(n.value)),
+                    )
+                  ) &&
+                  classesOf(c).some(
+                    (k) => !WRAPPER_CLASSES.has(k) && !/^(mod|is)-/.test(k),
+                  ),
+              )
+          )
+            return;
           // A box's own conditions (`.markdown-reading-view:has(> .sci-fi)`)
           // can't move to <body>: dropped, they'd always apply.
           if (
@@ -672,6 +757,7 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
           const rest = spec.map((v, k) => Math.max(0, v - own[k]!)) as Spec;
           if (!byLayer.has(layer)) byLayer.set(layer, []);
           byLayer.get(layer)!.push([head, rest]);
+          return layer;
         }
       }).processSync(rule.selector);
     } catch {
@@ -708,13 +794,20 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
         if (BACKGROUND_PROP.test(d.prop))
           bg.append(...layerDecls(d, layer, split));
       if (bg.nodes.length) rule.before(bg);
+      // The note's own box is Quartz's content root: its rule already applies
+      // there, apart from its backgrounds (below).
+      if (layer === NOTE_BOX_LAYER) continue;
       // Text styles set on a box inside the main split inherit into the note
       // as well (Prose's `.markdown-reading-view { letter-spacing }`), below
       // any rule for the note's own elements, as inherited values are.
-      const text =
+      // From the boxes around the sidebars too (`.workspace`, `.app-container`),
+      // the spacing the note doesn't set itself, as Obsidian's note doesn't
+      // (Nytharael, Cordyceps): its font, colour and line height it does set.
+      const text = decls.filter((d) =>
         layer <= MAIN_COLUMN_LAYER
-          ? decls.filter((d) => BOX_INHERITED.test(d.prop))
-          : [];
+          ? BOX_INHERITED.test(d.prop)
+          : /^(letter|word)-spacing$/.test(d.prop),
+      );
       const own = [...decls.filter((d) => d.prop.startsWith("--")), ...text];
       if (!own.length) continue;
       // Variables set on a box inherit into everything inside it: the note,
@@ -742,6 +835,22 @@ function paneBackgrounds(root: Root, split: ReadonlySet<string>): void {
       for (const d of used) onBody.append(d.clone());
       rule.before(onBody);
     }
+  // The note box's backgrounds are painted behind the page now: off the content
+  // root, which keeps the column's (the sizer's) own.
+  for (const [rule, , decls] of copies) {
+    const entry = noteBox.get(rule);
+    if (!entry?.box.size) continue;
+    const bgs = decls.filter((d) => BACKGROUND_PROP.test(d.prop));
+    if (!bgs.length) continue;
+    const rest = entry.all.filter((sel) => !entry.box.has(sel));
+    if (rest.length) {
+      const others = rule.clone({ selector: rest.join(", ") });
+      rule.after(others);
+      rule.selector = [...entry.box].join(", ");
+    }
+    for (const d of bgs) d.remove();
+    if (!rule.nodes?.length) rule.remove();
+  }
 }
 
 /**
@@ -753,7 +862,9 @@ const BOX_INHERITED =
   /^(color|font-family|font-weight|font-style|letter-spacing|word-spacing|line-height|font-feature-settings|font-variant(-[a-z]+)?|-webkit-font-smoothing|text-rendering)$/;
 
 /** The main split (`.mod-root`) and the boxes inside it: Quartz's `.center`. */
-const MAIN_COLUMN_LAYER = 6;
+const MAIN_COLUMN_LAYER = 7;
+/** The note's own box (`.markdown-preview-view`): Quartz's content root, but a pane-wide backdrop layer. */
+const NOTE_BOX_LAYER = 0;
 
 /** What Obsidian's app.css paints the boxes with (its own conversion is separate). */
 const APP_BOX_BACKGROUNDS = [
@@ -2332,7 +2443,11 @@ function processCompound(
           concrete = named = true;
         } else {
           concrete = true;
-          if (node.attribute.toLowerCase() !== "type") named = true;
+          // Generic HTML attributes don't name one of Obsidian's elements:
+          // `details[open]` is any open <details> (Swak's, which reached
+          // Quartz's properties block, also a <details>).
+          if (!/^(type|open|checked|disabled)$/i.test(node.attribute))
+            named = true;
         }
         break;
       }

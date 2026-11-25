@@ -144,52 +144,52 @@ describe("selector rewriting", () => {
       conv(
         "body.theme-dark .workspace-split.mod-root .workspace-tabs:not(.mod-top) { background: var(--x) }",
       ),
-      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ --qt-bg5-color: var\(--x\); --qt-bg5-image: none; --qt-bg5-tail: var\(--x\) \}/,
+      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ --qt-bg6-color: var\(--x\); --qt-bg6-image: none; --qt-bg6-tail: var\(--x\) \}/,
     );
     // Outer boxes get their own (outer) layers; a shorthand splits into colour and images.
     assert.equal(
       conv(".app-container { background: #111 linear-gradient(red, blue) }"),
-      "body:not(.qt-0) { --qt-bg9-color: #111; --qt-bg9-image: linear-gradient(red, blue); --qt-bg9-tail: none }",
+      "body:not(.qt-0) { --qt-bg10-color: #111; --qt-bg10-image: linear-gradient(red, blue); --qt-bg10-tail: none }",
     );
     assert.match(
       conv(".workspace { background-color: red }"),
-      /\{ --qt-bg7-color: red \}/,
+      /\{ --qt-bg8-color: red \}/,
     );
     // Every leaf includes the main one (Obsidian's own `.workspace-tabs .workspace-leaf`).
     assert.match(
       conv(".workspace-tabs .workspace-leaf { background-color: red }"),
-      /\{ --qt-bg3-color: red \}/,
+      /\{ --qt-bg4-color: red \}/,
     );
     // Body classes the rule requires stay (Style Settings toggles).
     assert.match(
       conv(".my-toggle .view-content { background-color: red }"),
-      /^body\.my-toggle[^ ]* \{ --qt-bg1-color: red \}/,
+      /^body\.my-toggle[^ ]* \{ --qt-bg2-color: red \}/,
     );
     // Transparent still overrides a less specific rule for the same box.
     assert.match(
       conv(".mod-root .view-content { background: transparent }"),
-      /--qt-bg1-color: transparent; --qt-bg1-image: none/,
+      /--qt-bg2-color: transparent; --qt-bg2-image: none/,
     );
     // Body's own backgrounds go to the bottom slot.
     assert.equal(
       conv("body { background: url(x.png) center / cover; color: red }"),
-      "body { --qt-bg10-color: transparent; --qt-bg10-image: url(x.png); --qt-bg10-tail: none; color: red }",
+      "body { --qt-bg11-color: transparent; --qt-bg11-image: url(x.png); --qt-bg11-tail: none; color: red }",
     );
     assert.equal(
       conv("body { background-size: cover }"),
-      "body { --qt-bg10-size: cover }",
+      "body { --qt-bg11-size: cover }",
     );
     // The note's own view type counts (Trailside, DDLC, Green Holiday).
     assert.match(
       conv(
         '.workspace-leaf-content[data-type="markdown"] .view-content { background-color: red }',
       ),
-      /\{ --qt-bg1-color: red \}/,
+      /\{ --qt-bg2-color: red \}/,
     );
     // Images over a colour variable keep the images (Imperium's vignette).
     assert.match(
       conv(".view-content { background: var(--vignette), var(--bg) }"),
-      /--qt-bg1-color: var\(--bg\); --qt-bg1-image: var\(--vignette\); --qt-bg1-tail: var\(--bg\)/,
+      /--qt-bg2-color: var\(--bg\); --qt-bg2-image: var\(--vignette\); --qt-bg2-tail: var\(--bg\)/,
     );
     // A variable holding images and a colour feeds both halves (AbsolutelyGlass).
     const glass = conv(
@@ -201,7 +201,7 @@ describe("selector rewriting", () => {
     );
     assert.match(
       glass,
-      /--qt-bg10-color: var\(--amb--qt-col\); --qt-bg10-image: none; --qt-bg10-tail: var\(--amb--qt-img\)/,
+      /--qt-bg11-color: var\(--amb--qt-col\); --qt-bg11-image: none; --qt-bg11-tail: var\(--amb--qt-img\)/,
     );
     // Also a single layer with its box, position and size (Whim).
     assert.match(
@@ -215,7 +215,7 @@ describe("selector rewriting", () => {
       conv(
         ".view-content { background: linear-gradient(red, blue) var(--pos) / var(--size) }",
       ),
-      /--qt-bg1-image: linear-gradient\(red, blue\);/,
+      /--qt-bg2-image: linear-gradient\(red, blue\);/,
     );
     // Font stacks and other comma lists are left alone.
     assert.doesNotMatch(
@@ -227,17 +227,52 @@ describe("selector rewriting", () => {
       conv(
         ".mod-root :is(.view-header, .view-content, .markdown-source-view) { background: transparent }",
       ),
-      /\{ --qt-bg1-color: transparent/,
+      /\{ --qt-bg2-color: transparent/,
     );
     // A bare `.workspace-split` is also the main split (Byrcen Breathe).
     assert.match(
       conv(".workspace-split { background: transparent }"),
-      /\{ --qt-bg6-color: transparent/,
+      /\{ --qt-bg7-color: transparent/,
     );
     assert.doesNotMatch(
       conv(".workspace-split.mod-horizontal { background: red }"),
       /--qt-bg/,
     );
+    // The note's own box fills the pane, around the column Quartz's content root
+    // stands for: its backgrounds go behind the page, under the column's
+    // (Graphite Island's grid under its paper sheet, Yosuke Glass's glows under
+    // its glass card), and off the content root.
+    const box = conv(
+      ".markdown-preview-view { background-color: #111; background-image: linear-gradient(red, blue); color: blue }",
+    );
+    assert.match(
+      box,
+      /^body:not\(\.qt-0\) \{ --qt-bg0-color: #111; --qt-bg0-image: linear-gradient\(red, blue\); --qt-bg0-tail: none \}/,
+    );
+    assert.doesNotMatch(box, /\.markdown-preview-view[^{]*\{[^}]*background/);
+    assert.match(box, /\.markdown-preview-view[^{]*\{ color: blue \}/);
+    // The column's own background stays on the content root.
+    assert.match(
+      conv(".markdown-preview-sizer { background-color: #222 }"),
+      /\{ background-color: #222 \}/,
+    );
+    // `.markdown-rendered` is the note box too (Forgotten Golden Sanctuary).
+    assert.match(
+      conv(".markdown-rendered { background-color: transparent }"),
+      /--qt-bg0-color: transparent/,
+    );
+    // Not inside an embed or a popover, which have a note box of their own.
+    const embed = conv(
+      ".markdown-embed .markdown-preview-view { background: none }",
+    );
+    assert.doesNotMatch(embed, /--qt-bg/);
+    assert.match(embed, /background: none/);
+    // In a selector list, only the note box's selectors lose their backgrounds.
+    const list = conv(
+      ".markdown-preview-view, .callout { background-color: red }",
+    );
+    assert.match(list, /--qt-bg0-color: red/);
+    assert.match(list, /\.callout[^{]*\{ background-color: red \}/);
     // Variables on a box inherit into the note: on the Quartz element that
     // stands for the box, inner boxes ahead of outer.
     assert.equal(
@@ -268,13 +303,20 @@ describe("selector rewriting", () => {
       /body:not\(#qt-0\):not\(\.qt-0\) \{ --bp: red \}/,
     );
     assert.equal(conv(".mod-left-split .workspace-tabs { --x: red }"), "");
+    // The outer boxes' letter and word spacing reach the note (and Quartz's
+    // chrome, as Obsidian's sidebars), not their font or colour, which the
+    // note sets itself (Nytharael's `.workspace { letter-spacing }`).
+    assert.match(
+      conv(".workspace { letter-spacing: 0.01em; font-family: X; color: red }"),
+      /^body #quartz-root[^{]*\{ letter-spacing: 0\.01em \}$/,
+    );
     // Body classes from the selector's first compound, whatever whitespace
     // the list left on them (Micro Mike).
     assert.match(
       conv(
         ".a .x,\n.dtm08 .workspace-tabs .workspace-leaf { background: red }",
       ),
-      /body\.dtm08:not\(\.qt-0\)[^{]*\{ --qt-bg3-color: red/,
+      /body\.dtm08:not\(\.qt-0\)[^{]*\{ --qt-bg4-color: red/,
     );
     // A box's own :has() condition can't move to <body> (Fancy-a-Story).
     assert.doesNotMatch(
@@ -352,6 +394,20 @@ describe("selector rewriting", () => {
       conv(".markdown-rendered { padding: 4px }"),
       /metadata-container/,
     );
+    // The note's colour, behind Obsidian's block, is on Quartz's: ahead of the
+    // theme's rules, beating app.css's transparent block but not the theme's
+    // own (Waypoint Atlas's sheet under its properties).
+    assert.equal(
+      conv(
+        ".metadata-container { background: red } .markdown-preview-view .markdown-preview-sizer { background-color: #eee }",
+      ),
+      ".metadata-container { background-color: #eee } .metadata-container { background: red } .markdown-preview-view:not(.qt-0) { background-color: #eee }",
+    );
+    // Body toggles stay conditions.
+    assert.match(
+      conv("body.my-toggle .markdown-preview-sizer { background: blue }"),
+      /^:where\(body\.my-toggle\) \.metadata-container \{ background-color: blue \}/,
+    );
   });
 
   test("nested rules are flattened before conversion", () => {
@@ -361,7 +417,7 @@ describe("selector rewriting", () => {
       conv(
         'body { color: red; .workspace-leaf-content[data-type="markdown"] .view-content { background-image: linear-gradient(red, blue) } }',
       ),
-      /--qt-bg1-image: linear-gradient\(red, blue\)/,
+      /--qt-bg2-image: linear-gradient\(red, blue\)/,
     );
     // `&` is the parent; declarations after a nested rule keep their place.
     assert.equal(
@@ -540,6 +596,16 @@ describe("selector rewriting", () => {
     assert.equal(
       conv("hr { margin: 0 1.5em }"),
       "hr:where(.markdown-rendered *) { margin: 0 1.5em }",
+    );
+    // Quartz's properties block is a <details> with a <summary> heading, which
+    // Obsidian's bare rules for foldable blocks in notes don't reach (Copper Rose).
+    assert.equal(
+      conv("summary { color: red; font-weight: 600 }"),
+      "summary:where(.markdown-rendered *) { color: red; font-weight: 600 }",
+    );
+    assert.equal(
+      conv("details[open] { background-color: #fff !important }"),
+      "details[open]:where(.markdown-rendered *) { background-color: #fff !important }",
     );
     // Named ancestors are specific enough already.
     assert.equal(

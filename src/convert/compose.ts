@@ -52,10 +52,10 @@ export const BRIDGE: Record<string, string> = {
  * inherit their text styles, as Obsidian's divs do, not Quartz's heading and
  * highlight styles.
  */
-export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, .markdown-embed, input[type="checkbox"]) {
+export const CONTENT_REVERT = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, .markdown-embed, input[type="checkbox"]) {
   all: revert;
-}
-:where(.markdown-preview-view .callout.is-collapsed > .callout-content) {
+}`;
+export const CONTENT_RESET = `:where(.markdown-preview-view .callout.is-collapsed > .callout-content) {
   display: none !important;
 }
 :where(.search > .search-container:not(.active)) {
@@ -160,10 +160,10 @@ export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h
  * expects. Icons keep their size attributes; the `<summary>` marker stays
  * hidden, as Obsidian's heading has none.
  */
-export const PROPERTIES_RESET = `:where(.metadata-container, .metadata-container :not(svg, svg *)) {
+export const PROPERTIES_REVERT = `:where(.metadata-container, .metadata-container :not(svg, svg *)) {
   all: revert;
-}
-/* Obsidian's block sits in the reading view and inherits its text font; Quartz's
+}`;
+export const PROPERTIES_RESET = `/* Obsidian's block sits in the reading view and inherits its text font; Quartz's
    sits above the note. */
 :where(.metadata-container) {
   font-family: var(--font-text);
@@ -485,6 +485,10 @@ export function composeStylesheet({
     "@layer quartz-base, obsidian;",
     backdropProperties(),
     "@layer obsidian {",
+    // The reverts undo Quartz's base styles under every rule of Obsidian's and
+    // the theme's, the theme's own cascade layers too (Auger's Tailwind
+    // `@layer base` code font): in a sub-layer declared first, the lowest.
+    reset && `@layer qt-revert {\n${CONTENT_REVERT}\n${PROPERTIES_REVERT}\n}`,
     reset && CONTENT_RESET,
     reset && PROPERTIES_RESET,
     CALLOUT_ICON_CSS,

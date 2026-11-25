@@ -186,6 +186,10 @@ export const BARE_TAGS: Record<string, "drop" | "content"> = {
   li: "content",
   a: "content",
   hr: "content",
+  // Foldable blocks in notes; Quartz's properties block is a <details> too (its
+  // heading a <summary>), where Obsidian's is divs that bare rules don't reach.
+  details: "content",
+  summary: "content",
 };
 
 /** Wrapper classes that do have a Quartz counterpart. */

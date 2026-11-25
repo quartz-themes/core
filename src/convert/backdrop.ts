@@ -19,8 +19,15 @@
 import type { Declaration, Root } from "postcss";
 import postcss from "postcss";
 
-/** Inner to outer. `body` is the last slot. */
+/**
+ * Inner to outer. `body` is the last slot. The note's own box
+ * (`.markdown-preview-view`) fills the pane in Obsidian, around the column
+ * (`.markdown-preview-sizer`) that Quartz's content root stands for: its
+ * backgrounds are behind the page too, under the column's (a paper sheet
+ * hides the grid or glow drawn behind it).
+ */
 export const BACKDROP_LAYERS = [
+  "markdown-preview-view",
   "markdown-reading-view",
   "view-content",
   "workspace-leaf-content",
