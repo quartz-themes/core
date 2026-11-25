@@ -101,7 +101,11 @@ export function convertTheme({
     quarantine: [
       app.quarantine,
       own(
-        [theme.quarantine, ...snips.map((s) => s.quarantine)]
+        [
+          theme.quarantine,
+          ...snips.map((s) => s.quarantine),
+          settings.quarantine,
+        ]
           .filter(Boolean)
           .join("\n"),
       ),

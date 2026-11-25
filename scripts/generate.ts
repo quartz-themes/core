@@ -94,12 +94,31 @@ appRoot.walkAtRules(/^font-face$/i, (at) => {
     droppedFonts++;
   }
 });
+// Its images are shipped inside the app too (`public/external-link.svg`, the
+// external link icon): inlined from vendor/obsidian-public, taken from the app.
+const publicDir = path.join(root, "vendor/obsidian-public");
+let inlinedImages = 0;
+appRoot.walkDecls((decl) => {
+  decl.value = decl.value.replace(
+    /url\(\s*(["']?)(?:\.\/)?public\/([\w.-]+\.svg)\1\s*\)/gi,
+    (m, _q, file: string) => {
+      const f = path.join(publicDir, file);
+      if (!fs.existsSync(f)) return m;
+      inlinedImages++;
+      const svg = fs
+        .readFileSync(f, "utf8")
+        .replace(/<\?xml[^>]*\?>\s*/, "")
+        .trim();
+      return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    },
+  );
+});
 const app = convertObsidianCss(appRoot.toString(), {
   resolveIcon,
   filename: "app.css",
 });
 console.log(
-  `app.css: dropped ${droppedFonts} @font-face rules pointing at Obsidian's bundled files`,
+  `app.css: dropped ${droppedFonts} @font-face rules pointing at Obsidian's bundled files, inlined ${inlinedImages} of its images`,
 );
 const sha = crypto
   .createHash("sha256")

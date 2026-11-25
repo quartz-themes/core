@@ -87,11 +87,11 @@ describe("selector rewriting", () => {
     assert.equal(conv(".view-content > div { color: red }"), "");
     assert.equal(
       conv(".workspace > .workspace-split.mod-root hr { color: red }"),
-      ":not(.qt-0)>:not(.qt-0):not(.qt-0) hr { color: red }",
+      ":not(.qt-0)>:not(.qt-0):not(.qt-0) hr:where(.markdown-rendered *) { color: red }",
     );
     assert.equal(
       conv(".markdown-reading-view > .markdown-preview-view { color: red }"),
-      ":not(.qt-0)>.markdown-preview-view { color: red }",
+      ":not(.qt-0)>.markdown-preview-view { color: red } :where(:not(.qt-0)>:not(.qt-0) .metadata-container) { color: red }",
     );
     assert.equal(
       conv("p:not(button) { color: red }"),
@@ -100,11 +100,16 @@ describe("selector rewriting", () => {
   });
 
   test("bare form controls don't reach Quartz chrome", () => {
-    assert.equal(conv("button { display: inline-flex }"), "");
+    // Buttons in notes (the code block's copy button) get Obsidian's button rules.
+    assert.equal(
+      conv("button { display: inline-flex }"),
+      "button:where(.markdown-rendered *) { display: inline-flex }",
+    );
     assert.equal(
       conv(".theme-dark button:not(.clickable-icon):hover { color: red }"),
-      "",
+      ':where(body):is([saved-theme="dark"] *) button:not(.clickable-icon):hover:where(.markdown-rendered *) { color: red }',
     );
+    assert.equal(conv(".modal button { color: red }"), "");
     assert.equal(
       conv(".search button { color: red }"),
       ".search button { color: red }",
@@ -112,6 +117,500 @@ describe("selector rewriting", () => {
     assert.equal(
       conv("input[type=checkbox]::after { color: red }"),
       "input[type=checkbox]:where(.markdown-rendered *)::after { color: red }",
+    );
+    // Single-colon pseudo-elements too: `:checked:after:where(…)` is invalid
+    // and dropped the rule (Obsidian's checkmark).
+    assert.equal(
+      conv("input[type=checkbox]:checked:after { content: '' }"),
+      "input[type=checkbox]:checked:where(.markdown-rendered *):after { content: '' }",
+    );
+  });
+
+  test("a sizer under :is() of root names is the root itself", () => {
+    // Blue Topaz's letter spacing and line height.
+    assert.equal(
+      conv(
+        ":is(.markdown-preview-view,.markdown-rendered) .markdown-preview-sizer { letter-spacing: 2px }",
+      ),
+      ":is(.markdown-preview-view,.markdown-rendered):not(.qt-0) { letter-spacing: 2px } :where(:not(.qt-0) :not(.qt-0) .metadata-container) { letter-spacing: 2px }",
+    );
+  });
+
+  test("the boxes behind the note paint Quartz's page, each in its layer", () => {
+    // Border's "root split background" option: the tabs' layer, with the
+    // rule's body conditions and specificity. A lone `var()` may be a colour
+    // or an image: it feeds the colour and the tail image.
+    assert.match(
+      conv(
+        "body.theme-dark .workspace-split.mod-root .workspace-tabs:not(.mod-top) { background: var(--x) }",
+      ),
+      /^body[^ ]*:is\(\[saved-theme="dark"\] \*\)[^ ]* \{ --qt-bg6-color: var\(--x\); --qt-bg6-image: none; --qt-bg6-tail: var\(--x\) \}/,
+    );
+    // Outer boxes get their own (outer) layers; a shorthand splits into colour and images.
+    assert.equal(
+      conv(".app-container { background: #111 linear-gradient(red, blue) }"),
+      "body:not(.qt-0) { --qt-bg10-color: #111; --qt-bg10-image: linear-gradient(red, blue); --qt-bg10-tail: none }",
+    );
+    assert.match(
+      conv(".workspace { background-color: red }"),
+      /\{ --qt-bg8-color: red \}/,
+    );
+    // Every leaf includes the main one (Obsidian's own `.workspace-tabs .workspace-leaf`).
+    assert.match(
+      conv(".workspace-tabs .workspace-leaf { background-color: red }"),
+      /\{ --qt-bg4-color: red \}/,
+    );
+    // Body classes the rule requires stay (Style Settings toggles).
+    assert.match(
+      conv(".my-toggle .view-content { background-color: red }"),
+      /^body\.my-toggle[^ ]* \{ --qt-bg2-color: red \}/,
+    );
+    // Transparent still overrides a less specific rule for the same box.
+    assert.match(
+      conv(".mod-root .view-content { background: transparent }"),
+      /--qt-bg2-color: transparent; --qt-bg2-image: none/,
+    );
+    // Body's own backgrounds go to the bottom slot.
+    assert.equal(
+      conv("body { background: url(x.png) center / cover; color: red }"),
+      "body { --qt-bg11-color: transparent; --qt-bg11-image: url(x.png); --qt-bg11-tail: none; color: red }",
+    );
+    assert.equal(
+      conv("body { background-size: cover }"),
+      "body { --qt-bg11-size: cover }",
+    );
+    // The note's own view type counts (Trailside, DDLC, Green Holiday).
+    assert.match(
+      conv(
+        '.workspace-leaf-content[data-type="markdown"] .view-content { background-color: red }',
+      ),
+      /\{ --qt-bg2-color: red \}/,
+    );
+    // Images over a colour variable keep the images (Imperium's vignette).
+    assert.match(
+      conv(".view-content { background: var(--vignette), var(--bg) }"),
+      /--qt-bg2-color: var\(--bg\); --qt-bg2-image: var\(--vignette\); --qt-bg2-tail: var\(--bg\)/,
+    );
+    // A variable holding images and a colour feeds both halves (AbsolutelyGlass).
+    const glass = conv(
+      ":root { --amb: radial-gradient(red, blue), #eee } body { background: var(--amb) }",
+    );
+    assert.match(
+      glass,
+      /--amb--qt-img: radial-gradient\(red, blue\); --amb--qt-col: #eee/,
+    );
+    assert.match(
+      glass,
+      /--qt-bg11-color: var\(--amb--qt-col\); --qt-bg11-image: none; --qt-bg11-tail: var\(--amb--qt-img\)/,
+    );
+    // Also a single layer with its box, position and size (Whim).
+    assert.match(
+      conv(
+        ":root { --pat: repeating-radial-gradient(red, blue) content-box 50% / 10px repeat } .workspace { background: var(--pat) }",
+      ),
+      /--pat--qt-img: repeating-radial-gradient\(red, blue\); --pat--qt-col: transparent/,
+    );
+    // Beside an image, a var() is its position or size, not another image.
+    assert.match(
+      conv(
+        ".view-content { background: linear-gradient(red, blue) var(--pos) / var(--size) }",
+      ),
+      /--qt-bg2-image: linear-gradient\(red, blue\);/,
+    );
+    // Font stacks and other comma lists are left alone.
+    assert.doesNotMatch(
+      conv(":root { --f: Inter, sans-serif } body { font-family: var(--f) }"),
+      /--qt-img/,
+    );
+    // An `:is()` of boxes paints each (Glassfelt's transparent panes).
+    assert.match(
+      conv(
+        ".mod-root :is(.view-header, .view-content, .markdown-source-view) { background: transparent }",
+      ),
+      /\{ --qt-bg2-color: transparent/,
+    );
+    // A bare `.workspace-split` is also the main split (Byrcen Breathe).
+    assert.match(
+      conv(".workspace-split { background: transparent }"),
+      /\{ --qt-bg7-color: transparent/,
+    );
+    assert.doesNotMatch(
+      conv(".workspace-split.mod-horizontal { background: red }"),
+      /--qt-bg/,
+    );
+    // The note's own box fills the pane, around the column Quartz's content root
+    // stands for: its backgrounds go behind the page, under the column's
+    // (Graphite Island's grid under its paper sheet, Yosuke Glass's glows under
+    // its glass card), and off the content root.
+    const box = conv(
+      ".markdown-preview-view { background-color: #111; background-image: linear-gradient(red, blue); color: blue }",
+    );
+    assert.match(
+      box,
+      /^body:not\(\.qt-0\) \{ --qt-bg0-color: #111; --qt-bg0-image: linear-gradient\(red, blue\); --qt-bg0-tail: none \}/,
+    );
+    assert.doesNotMatch(box, /\.markdown-preview-view[^{]*\{[^}]*background/);
+    assert.match(box, /\.markdown-preview-view[^{]*\{ color: blue \}/);
+    // The column's own background stays on the content root.
+    assert.match(
+      conv(".markdown-preview-sizer { background-color: #222 }"),
+      /\{ background-color: #222 \}/,
+    );
+    // `.markdown-rendered` is the note box too (Forgotten Golden Sanctuary).
+    assert.match(
+      conv(".markdown-rendered { background-color: transparent }"),
+      /--qt-bg0-color: transparent/,
+    );
+    // Not inside an embed or a popover, which have a note box of their own.
+    const embed = conv(
+      ".markdown-embed .markdown-preview-view { background: none }",
+    );
+    assert.doesNotMatch(embed, /--qt-bg/);
+    assert.match(embed, /background: none/);
+    // In a selector list, only the note box's selectors lose their backgrounds.
+    const list = conv(
+      ".markdown-preview-view, .callout { background-color: red }",
+    );
+    assert.match(list, /--qt-bg0-color: red/);
+    assert.match(list, /\.callout[^{]*\{ background-color: red \}/);
+    // Variables on a box inherit into the note: on the Quartz element that
+    // stands for the box, inner boxes ahead of outer.
+    assert.equal(
+      conv("body .app-container { --x: red }"),
+      "body #quartz-root:not(.qt-0) { --x: red }",
+    );
+    assert.match(
+      conv(".view-content { --x: red }"),
+      /^body \.center(:not\(#qt-0\)){5}:not\(.qt-0\) \{ --x: red \}$/,
+    );
+    // Those a box's background uses also go to <body>, where the boxes are
+    // painted (Fantasy's translucent panes); others don't (Dracula + LYT's
+    // main-split border colour, which <body>'s --hr-color is built from).
+    assert.match(
+      conv(".app-container { --background-primary: red }"),
+      /^body #quartz-root[^}]*\}\s*body:not\(#qt-0\)/,
+    );
+    assert.doesNotMatch(
+      conv(
+        ".mod-root { --background-modifier-border: red } button { background: var(--background-modifier-border) }",
+      ),
+      /body:not\(#qt-0\)/,
+    );
+    assert.match(
+      conv(
+        ".app-container { --bp: red } .workspace-leaf { background: var(--bp) }",
+      ),
+      /body:not\(#qt-0\):not\(\.qt-0\) \{ --bp: red \}/,
+    );
+    assert.equal(conv(".mod-left-split .workspace-tabs { --x: red }"), "");
+    // The outer boxes' letter and word spacing reach the note (and Quartz's
+    // chrome, as Obsidian's sidebars), not their font or colour, which the
+    // note sets itself (Nytharael's `.workspace { letter-spacing }`).
+    assert.match(
+      conv(".workspace { letter-spacing: 0.01em; font-family: X; color: red }"),
+      /^body #quartz-root[^{]*\{ letter-spacing: 0\.01em \}$/,
+    );
+    // Body classes from the selector's first compound, whatever whitespace
+    // the list left on them (Micro Mike).
+    assert.match(
+      conv(
+        ".a .x,\n.dtm08 .workspace-tabs .workspace-leaf { background: red }",
+      ),
+      /body\.dtm08:not\(\.qt-0\)[^{]*\{ --qt-bg4-color: red/,
+    );
+    // A box's own :has() condition can't move to <body> (Fancy-a-Story).
+    assert.doesNotMatch(
+      conv(".markdown-reading-view:has(> .sci-fi) { --skin: on }"),
+      /^body/,
+    );
+    // Sidebars, popovers and other view types are left alone.
+    assert.equal(
+      conv(".mod-left-split .workspace-tabs { background: red }"),
+      "",
+    );
+    assert.doesNotMatch(
+      conv('.workspace-leaf-content[data-type="graph"] { background: red }'),
+      /--qt-bg/,
+    );
+    // Any other view type, also by prefix (Kakano's plugin tabs).
+    assert.doesNotMatch(
+      conv(
+        '.workspace-leaf-content[data-type^="swar8080"] .view-content { background: red }',
+      ),
+      /--qt-bg/,
+    );
+    assert.doesNotMatch(
+      conv(
+        '.workspace-leaf-content:not([data-type="markdown"]) > .view-content { background: red }',
+      ),
+      /--qt-bg/,
+    );
+  });
+
+  test("a body class on another element is that element's state", () => {
+    // Paperglow's focused pill isn't every pill.
+    assert.equal(
+      conv(".multi-select-pill.is-focused { color: red }"),
+      ".multi-select-pill.is-focused { color: red }",
+    );
+    assert.equal(
+      conv("body.is-focused .x { color: red }"),
+      "body:not(.qt-0) .x { color: red }",
+    );
+  });
+
+  test("an empty variable among a background's definitions (ITS Theme)", () => {
+    assert.doesNotThrow(() =>
+      conv(
+        ".a { --x:; } .b { --x: url(a.png) 0 0 / 10px; } body { background: var(--x) } .c { background: ; }",
+      ),
+    );
+  });
+
+  test("the properties block inherits the note's text styles", () => {
+    // Obsidian's block is inside the note; Quartz's above it (Cairn).
+    assert.match(
+      conv(".markdown-rendered { letter-spacing: 1px; padding: 4px }"),
+      /:where\(:not\(\.qt-0\) \.metadata-container\) \{ letter-spacing: 1px \}/,
+    );
+    // Through :is() (Blue Topaz's readable-width letter spacing).
+    assert.match(
+      conv(
+        ".markdown-preview-view :is(.markdown-preview-section, .markdown-rendered) { letter-spacing: 1px }",
+      ),
+      /\.metadata-container\)[^{]*\{ letter-spacing: 1px \}/,
+    );
+    // As inherited values: the block's own rules win over !important (Techwear).
+    assert.match(
+      conv(".markdown-rendered { color: red !important }"),
+      /:where\(:not\(\.qt-0\) \.metadata-container\) \{ color: red \}/,
+    );
+    // Not from other boxes, nor layout.
+    assert.doesNotMatch(
+      conv(".markdown-rendered h1 { letter-spacing: 1px }"),
+      /metadata-container/,
+    );
+    assert.doesNotMatch(
+      conv(".markdown-rendered { padding: 4px }"),
+      /metadata-container/,
+    );
+    // The note's colour, behind Obsidian's block, is on Quartz's: ahead of the
+    // theme's rules, beating app.css's transparent block but not the theme's
+    // own (Waypoint Atlas's sheet under its properties).
+    assert.equal(
+      conv(
+        ".metadata-container { background: red } .markdown-preview-view .markdown-preview-sizer { background-color: #eee }",
+      ),
+      ".metadata-container { background-color: #eee } .metadata-container { background: red } .markdown-preview-view:not(.qt-0) { background-color: #eee }",
+    );
+    // Body toggles stay conditions.
+    assert.match(
+      conv("body.my-toggle .markdown-preview-sizer { background: blue }"),
+      /^:where\(body\.my-toggle\) \.metadata-container \{ background-color: blue \}/,
+    );
+  });
+
+  test("nested rules are flattened before conversion", () => {
+    const flat = (css: string) => conv(css).replace(/\s+/g, " ");
+    // Descendants of the parent (dashboard's `body { .view-content { … } }`).
+    assert.match(
+      conv(
+        'body { color: red; .workspace-leaf-content[data-type="markdown"] .view-content { background-image: linear-gradient(red, blue) } }',
+      ),
+      /--qt-bg2-image: linear-gradient\(red, blue\)/,
+    );
+    // `&` is the parent; declarations after a nested rule keep their place.
+    assert.equal(
+      flat(
+        ".callout { color: red; &[data-callout=tip] { color: blue } margin: 0 }",
+      ),
+      flat(
+        ".callout { color: red } .callout[data-callout=tip] { color: blue } .callout { margin: 0 }",
+      ),
+    );
+    // A parent list is expanded at the list's specificity; a leading
+    // combinator is a child.
+    assert.equal(
+      flat("h1, .x h2 { > a { color: red } }"),
+      flat("h1:not(.qt-0) > a, .x h2 > a { color: red }"),
+    );
+    // Exactly: an alternative padding can't reach counts for nothing (evangelion's
+    // `body, .theme-dark { * { … } }` mustn't outrank `.markdown-rendered p`).
+    assert.equal(
+      flat(".a, body { * { margin: 0 } }"),
+      flat(".a *, :where(body):not(.qt-0) * { margin: 0 }"),
+    );
+    // An editor-only alternative doesn't take the others with it (Retroma).
+    assert.match(
+      conv(
+        ".is-live-preview input[type=checkbox], li > input[type=checkbox] { &:checked { background: none } }",
+      ),
+      /li ?> ?input\[type=checkbox\][^{]*:checked/,
+    );
+    // Nested at-rules wrap the parent.
+    assert.equal(
+      flat(".callout { @media (max-width: 600px) { color: red } }"),
+      flat("@media (max-width: 600px) { .callout { color: red } }"),
+    );
+  });
+
+  test("Quartz's sidebars are open docks", () => {
+    // Neumorphism: a collapsed dock's negative margins pushed the sidebar off-screen.
+    assert.equal(
+      conv(
+        "body:not(.is-mobile) .workspace:not(.is-right-sidedock-open) > .workspace-split.mod-right-split { margin-inline: -4px }",
+      ),
+      "",
+    );
+    assert.match(
+      conv(".workspace.is-left-sidedock-open .mod-left-split { color: red }"),
+      /\.left\.sidebar/,
+    );
+  });
+
+  test("Prism's token classes are Quartz's token types", () => {
+    assert.equal(
+      conv(".token.number { color: red }"),
+      '[data-token-type][data-token-type="value"] { color: red }',
+    );
+    // Prism's finer classes are tokens Quartz lumps in with a broader type:
+    // a theme's colour for them (Desert's `.token.atrule`) is not its keywords'.
+    assert.match(
+      conv(".token.atrule { color: red }"),
+      /data-token-type="prism-atrule"/,
+    );
+    assert.match(
+      conv(".language-css .token.string { color: red }"),
+      /\[data-language="css"\] \[data-token-type\]\[data-token-type="string"\]/,
+    );
+    // Not Quartz's own tags.
+    assert.match(conv(".tag { color: red }"), /^\.tag/);
+  });
+
+  test("inline headings stack, each alone in its block as in Obsidian", () => {
+    assert.match(
+      conv(".markdown-rendered h1 { display: inline }"),
+      /h1:where\(\.markdown-preview-view > \*\) \{ display: block; width: fit-content; margin-block: 0 !important \}/,
+    );
+    assert.doesNotMatch(conv("h2 { display: inline-block }"), /fit-content/);
+    assert.doesNotMatch(conv("span { display: inline }"), /fit-content/);
+  });
+
+  test("Obsidian's block wrappers (.el-*) are Quartz's blocks", () => {
+    // The wrapper and its element: the element, with the wrapper's specificity.
+    assert.equal(
+      conv("div.el-p > p { margin: 0 }"),
+      "p:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin: 0 }",
+    );
+    // A wrapper's any-child is its block (Baseline's lists after paragraphs).
+    assert.equal(
+      conv(".el-p + div:is(.el-ul, .el-ol) > * { margin-top: 20px }"),
+      ":where(p):not(.qt-0)+:where(ul, ol):not(.qt-0):not(qt-0):where(.markdown-preview-view > *) { margin-top: 20px }",
+    );
+    // The div a wrapper sits in is the sizer: Quartz's note root.
+    assert.equal(
+      conv(".markdown-rendered div > .el-ul > ul { margin-top: -5px }"),
+      ".markdown-rendered ul:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin-top: -5px }",
+    );
+    // Also as a descendant (Willemstad), and only the note's own blocks: the
+    // footnotes' hr has no wrapper.
+    assert.equal(
+      conv(".el-hr hr { margin: 0 }"),
+      "hr:where(.markdown-preview-view > *):not(.qt-0) { margin: 0 }",
+    );
+    // "A heading after a table": Quartz's table block is .table-container,
+    // and the heading's own wrapper goes.
+    assert.equal(
+      conv(".el-table + div > h2 { margin-top: 3em }"),
+      ":where(.table-container):not(.qt-0)+h2:not(qt-0) { margin-top: 3em }",
+    );
+    // Code blocks: the highlighted figure or a bare pre, never a figure type
+    // selector (theme figure rules stay off Quartz's code figure).
+    assert.equal(
+      conv(".el-pre { border: 1px solid red }"),
+      ":where([data-rehype-pretty-code-figure], :not([data-rehype-pretty-code-figure]) > pre):not(.qt-0) { border: 1px solid red }",
+    );
+    // Lists of wrappers inside :is().
+    assert.match(
+      conv("div:is(.el-p, .el-table) + div > h3 { color: red }"),
+      /^:where\(p, \.table-container\)/,
+    );
+  });
+
+  test("the block after Obsidian's pusher is the note's first block", () => {
+    // Obsidian: only the first block loses its top margin. Not every block's
+    // first child (Quartz's table inside .table-container).
+    const out = conv(
+      ".markdown-rendered > .markdown-preview-section > .markdown-preview-pusher + div:not(.mod-ui) > :first-child { margin-top: 0 }",
+    );
+    assert.match(out, /:first-child/);
+    assert.doesNotMatch(out, /\+/);
+    assert.doesNotMatch(out, /pusher/);
+  });
+
+  test("property pills are styled; their editing parts are app-only", () => {
+    assert.equal(
+      conv(".multi-select-pill { border-radius: 9px }"),
+      ".multi-select-pill { border-radius: 9px }",
+    );
+    assert.equal(conv(".multi-select-pill-remove-button { color: red }"), "");
+    assert.equal(conv(".multi-select-input { color: red }"), "");
+  });
+
+  test("properties rules scoped to the reading view reach Quartz's properties block", () => {
+    // Quartz renders properties above the note, outside .markdown-preview-view.
+    assert.equal(
+      conv(".markdown-preview-view .metadata-container { background: red }"),
+      ":not(.qt-0) .metadata-container { background: red }",
+    );
+    assert.equal(
+      conv(
+        ".theme-dark .markdown-rendered.is-readable .metadata-property-key { color: red }",
+      ),
+      ':where(body):is([saved-theme="dark"] *) :not(.qt-0).is-readable .metadata-property-key { color: red }',
+    );
+    // Unscoped and unrelated rules are untouched.
+    assert.equal(
+      conv(".metadata-container { background: red }"),
+      ".metadata-container { background: red }",
+    );
+  });
+
+  test("bare list and link rules style notes, not Quartz's explorer or table of contents", () => {
+    // Blue Topaz: meant for note lists; Quartz's explorer is `ul > li`.
+    assert.equal(
+      conv(
+        "body:not(.x) ul > li:not(.task-list-item) { border-left: none !important }",
+      ),
+      "body:not(.x) ul>li:not(.task-list-item):where(.markdown-rendered *) { border-left: none !important }",
+    );
+    assert.equal(
+      conv("ol li::marker { color: red }"),
+      "ol li:where(.markdown-rendered *)::marker { color: red }",
+    );
+    assert.equal(
+      conv("a { color: var(--link-color) }"),
+      "a:where(.markdown-rendered *) { color: var(--link-color) }",
+    );
+    // Quartz's rule above the footer is outside the note (Weave Surface's margins).
+    assert.equal(
+      conv("hr { margin: 0 1.5em }"),
+      "hr:where(.markdown-rendered *) { margin: 0 1.5em }",
+    );
+    // Quartz's properties block is a <details> with a <summary> heading, which
+    // Obsidian's bare rules for foldable blocks in notes don't reach (Copper Rose).
+    assert.equal(
+      conv("summary { color: red; font-weight: 600 }"),
+      "summary:where(.markdown-rendered *) { color: red; font-weight: 600 }",
+    );
+    assert.equal(
+      conv("details[open] { background-color: #fff !important }"),
+      "details[open]:where(.markdown-rendered *) { background-color: #fff !important }",
+    );
+    // Named ancestors are specific enough already.
+    assert.equal(
+      conv(".callout ul { margin: 0 }"),
+      ".callout ul { margin: 0 }",
     );
   });
 
@@ -158,10 +657,18 @@ describe("selector rewriting", () => {
       ),
       "",
     );
+    // As an ancestor, a typed wrapper is no more than the wrapper (ITS).
+    assert.equal(
+      conv(
+        ".view-content > div:is(.markdown-source-view, .markdown-reading-view) > div { container: note/inline-size }",
+      ),
+      "",
+    );
+    assert.equal(conv("div.markdown-reading-view > div { color: red }"), "");
     // The block wrapper's siblings are block wrappers too.
     assert.equal(
-      conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 0 }"),
-      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: 0 }",
+      conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 1em }"),
+      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: calc(1 * var(--font-text-size)) }",
     );
   });
 
@@ -217,7 +724,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view.is-readable-line-width, .callout { padding-inline: 2em; padding-top: 1em; color: red }",
       ),
-      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red }",
+      ".callout { padding-inline: 2em; padding-top: 1em; color: red } .markdown-preview-view:not(.qt-0) { color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     // Descendants keep theirs.
     assert.equal(
@@ -229,7 +736,7 @@ describe("selector rewriting", () => {
       conv(
         "body, .markdown-preview-view { padding: 1em; overflow: hidden; color: red }",
       ),
-      ".markdown-preview-view { color: red } body { padding: 1em; color: red }",
+      ".markdown-preview-view { color: red } body { padding: 1em; color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     // Themes set the file margins on .markdown-rendered too (same element), as
     // margins, or behind a body class, which nests the subject in :is().
@@ -237,7 +744,7 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-rendered { padding: 24px 32px; margin: 0 15px; color: red }",
       ),
-      ".markdown-rendered { color: red }",
+      ".markdown-rendered { color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
     );
     assert.equal(
       conv(
@@ -258,7 +765,115 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view { min-width: 80ch; max-width: 50%; color: red }",
       ),
-      ".markdown-preview-view { max-width: 50%; color: red }",
+      ".markdown-preview-view { max-width: 50%; color: red } :where(:not(.qt-0) .metadata-container) { color: red }",
+    );
+  });
+
+  test("bare headings behind :is() stay in the note", () => {
+    // Lancer: `.cm-header-1, h1 { &:before {…} }` drew on Quartz's titles.
+    assert.equal(
+      conv(".cm-header-1, h1 { &:before { content: '' } }"),
+      ":where(h1):not(.qt-0):where(.markdown-rendered *):before { content: '' }",
+    );
+  });
+
+  test("the block wrapper can be the element between the note and a block", () => {
+    // Micro Mike: `:not(:is(li, ul, ol))` is the wrapper for top-level blocks.
+    assert.equal(
+      conv(
+        ".markdown-preview-section :not(:is(li, ul, ol)) > h2 { margin-top: 20px }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0) :not(:is(li,ul,ol))>h2,:where(.markdown-preview-view):not(.qt-0):not(qt-0)>h2 { margin-top: 20px }",
+    );
+    // A named element in between isn't the wrapper.
+    assert.equal(
+      conv(".markdown-rendered .callout > p { color: red }"),
+      ".markdown-rendered .callout > p { color: red }",
+    );
+  });
+
+  test("wrappers in an ancestor's :is() are any ancestor", () => {
+    // Micro Mike's column sizer was dropped along with the editor's alternative.
+    assert.equal(
+      conv(
+        ":is(.markdown-reading-view, .markdown-source-view) p { color: red }",
+      ),
+      ":is(:not(.qt-0)) p { color: red }",
+    );
+    // Their children still need a name of their own.
+    assert.equal(
+      conv(":is(.workspace-leaf-content, .view-content) > div { color: red }"),
+      "",
+    );
+  });
+
+  test("a column flexbox on the note keeps its margins apart", () => {
+    // DarkEmber: flex items' margins don't collapse.
+    assert.equal(
+      conv(
+        ".markdown-preview-view.is-readable-line-width .markdown-preview-sizer { display: flex; flex-direction: column }",
+      ),
+      ".markdown-preview-view:not(.qt-0):not(.qt-0) { display: flex; flex-direction: column }",
+    );
+  });
+
+  test("universal rules reach the blocks through their wrappers", () => {
+    // SpectrumPlus: headings inherit (`--h2-font: inherit`) the wrapper's font.
+    assert.equal(
+      conv('* { font-family: "JetBrains Mono"; margin: 0 }'),
+      '* { font-family: "JetBrains Mono"; margin: 0 } :where(.markdown-preview-view):not(.qt-0):not(#qt-0) { font-family: "JetBrains Mono" }',
+    );
+    // Not the descendants of anything else.
+    assert.equal(
+      conv(".callout * { color: red }"),
+      ".callout * { color: red }",
+    );
+  });
+
+  test("a block wrapper's box is around the block, not inside it", () => {
+    // Discordian: the wrapper's side padding moves the block in; its zero and
+    // auto margins don't replace the block's own, which collapse through it.
+    assert.equal(
+      conv(
+        ".markdown-preview-section > div { padding-left: 4rem; padding-right: 2rem; margin: 0 auto 0 auto; max-width: 100% }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-left: 4rem; margin-right: 2rem; max-width: min(100%, calc(100% - 4rem - 2rem)) }",
+    );
+    // Its width holds that padding: the block stays within what it leaves.
+    assert.equal(
+      conv(".markdown-preview-section > div { padding: 0 2rem }"),
+      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-right: 2rem; margin-left: 2rem; max-width: calc(100% - 2rem - 2rem) }",
+    );
+    // Adrenaline: wrapper margins' ems are the note's text size; a zero one
+    // between neighbours leaves those blocks out of the wrapper margins.
+    assert.match(
+      conv("div.el-h2 { margin-top: var(--s, 4em) !important }"),
+      /\{ margin-top: var\(--s, calc\(4 \* var\(--font-text-size\)\)\) !important \}$/,
+    );
+    const cancelled = conv(
+      "div.el-h2 { margin-top: 4em !important } div.el-h1 + div.el-h2 { margin-top: 0em !important }",
+    );
+    assert.match(
+      cancelled,
+      /^:where\(h2\)[^{]*:where\(:not\(:where\(h1\)[^{]*\+:where\(h2\)[^{]*\)\) \{ margin-top: calc\(4 \* var\(--font-text-size\)\) !important \}$/,
+    );
+    // Office Mock: its paint is behind the block, its corners its own.
+    assert.match(
+      conv(
+        '.markdown-preview-sizer > [class^="el-"] { background: white; border-radius: 0; color: red }',
+      ),
+      /^:where\([^{]*\):where\(:not\(\.callout, pre, \[data-rehype-pretty-code-figure\]\)\) \{ background: white; border-radius: 0 \} [^{]* \{ color: red \}$/,
+    );
+    // Hidontknow: the space between blocks is the wrappers' top padding.
+    assert.match(
+      conv(
+        '.markdown-preview-sizer > [class^="el-"] ~ [class^="el-"] { padding-top: 28px }',
+      ),
+      /~:where\(p, ul, ol, [^{]*\{ margin-top: 28px \}/,
+    );
+    assert.equal(
+      conv(".el-hr { padding: 12px 0 }"),
+      ":where(hr):not(.qt-0):where(.markdown-rendered *) { margin-top: 12px; margin-bottom: 12px }",
     );
   });
 
@@ -304,6 +919,106 @@ describe("selector rewriting", () => {
       "@media (max-width: 800px) { body :is(:where(.left.sidebar):not(.qt-0),:where(.right.sidebar):not(.qt-0)) { color: red } }",
     );
     assert.equal(conv(".mod-left-split { opacity: 0 }"), "");
+  });
+
+  test("bases keep Quartz's table layout, and the theme's colours", () => {
+    // Obsidian's .bases-table is an absolutely positioned, virtualised div.
+    assert.equal(
+      conv(
+        ".bases-table { position: absolute; display: flex; width: 0; color: red }",
+      ),
+      ".bases-table { color: red }",
+    );
+    assert.equal(
+      conv(
+        ".bases-view .bases-tr { height: 30px; border-bottom: 1px solid red }",
+      ),
+      ".bases-view .bases-tr { border-bottom: 1px solid red }",
+    );
+  });
+
+  test("explorer rules follow Obsidian 1.12's tree, not every folder", () => {
+    // Pre-1.0 Obsidian's vault-root folder (and its vault-name row) is gone:
+    // its rules are dead in Obsidian and would hit every folder here.
+    assert.equal(
+      conv(".nav-folder.mod-root > .nav-folder-title { display: none }"),
+      "",
+    );
+    assert.equal(
+      conv(
+        ".nav-folder.mod-root > .nav-folder-children > .nav-folder { color: red }",
+      ),
+      "",
+    );
+    assert.equal(conv(".nav-folder.mod-root { display: none }"), "");
+    // Firefly leaves out `.nav-folder`.
+    assert.equal(conv(".mod-root > .nav-folder-title { display: none }"), "");
+    // Catppuccin hides the root's folder icon, not every folder's.
+    assert.equal(
+      conv(
+        ".nav-folder-collapse-indicator, .nav-folder.mod-root > .nav-folder-title .nav-folder-title-content::before, .nav-folder-title .nav-folder-title-content::before { display: none }",
+      ),
+      ".nav-folder-title .nav-folder-title-content::before { display: none }",
+    );
+    // Obsidian 1.x no longer renders `.nav-folder-collapse-indicator`.
+    assert.equal(
+      conv(".nav-folder-collapse-indicator svg { display: none }"),
+      "",
+    );
+    // Nor `.is-read-mode` on the leaf (it uses `[data-mode="preview"]`).
+    assert.equal(
+      conv(
+        ".workspace-leaf-content.is-read-mode .markdown-preview-view { background-color: var(--background-primary) }",
+      ),
+      "",
+    );
+    // Every folder is "not the root".
+    assert.equal(
+      conv(".nav-folder:not(.mod-root) > .nav-folder-title { color: red }"),
+      ".nav-folder:not(.qt-0)>.nav-folder-title { color: red }",
+    );
+    // Top-level items: Obsidian wraps them in a plain div, Quartz's list doesn't
+    // (Blue Topaz's coloured top-level folders).
+    assert.equal(
+      conv(
+        ".nav-files-container > div > .nav-folder:nth-child(8n+2) > .nav-folder-title { border-left: 2px solid red }",
+      ),
+      ".nav-files-container:not(qt-0)>.nav-folder:nth-child(8n+2)>.nav-folder-title { border-left: 2px solid red }",
+    );
+    assert.equal(
+      conv(".nav-files-container > div.foo > .nav-folder { color: red }"),
+      ".nav-files-container > div.foo > .nav-folder { color: red }",
+    );
+    // Oboro: a size container's height ignores its content (the explorer
+    // list would collapse); inline-size is harmless.
+    assert.equal(
+      conv(
+        ".nav-files-container { container-type: size scroll-state; container-name: x; color: red }",
+      ),
+      ".nav-files-container { container-name: x; color: red }",
+    );
+    // Behind a shared :is(), only Quartz's element loses it.
+    assert.equal(
+      conv(
+        ":is(.nav-files-container, .search-result-container) { container-type: size; color: red }",
+      ),
+      ":is(.search-result-container) { container-type: size; color: red } :is(.nav-files-container) { color: red }",
+    );
+    // Each part keeps the whole :is()'s specificity (Bog Oak's accent).
+    assert.equal(
+      conv(":is(body, .some-toggle) { overflow: hidden; --x: 1 }"),
+      ":is(.some-toggle) { overflow: hidden; --x: 1 } :is(body, .qt-0) { --x: 1 }",
+    );
+    assert.equal(
+      conv(".nav-files-container { container: x / inline-size }"),
+      ".nav-files-container { container: x / inline-size }",
+    );
+    // Book and Quill: `will-change: transform` would trap the phone
+    // explorer's fixed overlay inside the explorer.
+    assert.equal(
+      conv(".nav-files-container { will-change: transform; padding-top: 4px }"),
+      ".nav-files-container { padding-top: 4px }",
+    );
   });
 });
 
@@ -373,5 +1088,112 @@ describe("compose", () => {
     });
     assert.ok(main.startsWith(url), main.slice(0, 120));
     assert.match(main, /@layer obsidian \{[\s\S]*body \{ color: red \}/);
+  });
+
+  test("the properties block starts from UA styles in the obsidian layer", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /@layer obsidian \{[\s\S]*:where\(\.metadata-container, \.metadata-container :not\(svg, svg \*\)\) \{\n {2}all: revert;/,
+    );
+    assert.equal(
+      composeStylesheet({ app: "", theme: "", reset: false }).main.includes(
+        "metadata-container",
+      ),
+      false,
+    );
+  });
+
+  test("body keeps Obsidian's inline font size against normal theme rules", () => {
+    const { main } = composeStylesheet({
+      app: "",
+      theme: "body { --font-text-size: 18px }",
+    });
+    assert.match(
+      main,
+      /body { --font-text-size: 18px }[\s\S]*body(:not\(\.qt-0\)){32} \{\n {2}--zoom-factor: 1;\n {2}--font-text-size: 16px;/,
+    );
+    // Below a box's variables, which in Obsidian sit inside <body> (Mulled Wine).
+    assert.match(
+      conv(".app-container { --font-text-size: 14px }"),
+      /^body #quartz-root/,
+    );
+  });
+
+  test("code tokens take the theme's --code-* colours, below theme rules", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /@layer obsidian \{[\s\S]*:where\(\.markdown-rendered pre\) :where\(span\[data-token-type="keyword"\]\) \{ color: var\(--code-keyword\); \}/,
+    );
+    assert.match(
+      main,
+      /data-token-type="regexp"\]\) \{ color: var\(--code-important\)/,
+    );
+  });
+
+  test("explorer rows keep Obsidian's inline indentation, collapsed children are gone", () => {
+    const { main } = composeStylesheet({
+      app: "",
+      theme: ".nav-folder-title { padding-left: 4px !important }",
+    });
+    // In the lower layer, so its !important wins, like Obsidian's inline style.
+    assert.match(
+      main,
+      /\}\n@layer quartz-base \{\n:where\(\.explorer\) :where\(\.tree-item-self\) \{\n {2}margin-inline-start: 0 !important;\n {2}padding-inline-start: 24px !important;/,
+    );
+    assert.match(
+      main,
+      /:where\(\.folder-outer:not\(\.open\)\) \{\n {2}display: none !important;/,
+    );
+  });
+});
+
+describe("renamed elements", () => {
+  test("internal-link rules leave tags alone, which Quartz also marks as internal links", () => {
+    assert.equal(
+      conv(".markdown-rendered .internal-link { color: red }"),
+      ".markdown-rendered .internal-link:where(:not(.tag)) { color: red }",
+    );
+    assert.equal(
+      conv("a.internal-link:hover::after { content: 'x' }"),
+      "a.internal-link:hover:where(:not(.tag))::after { content: 'x' }",
+    );
+  });
+  test("folded callouts hide their content as Obsidian's inline style does; embeds start from UA styles", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.markdown-preview-view \.callout\.is-collapsed > \.callout-content\) \{\n {2}display: none !important;/,
+    );
+    assert.match(
+      main,
+      /\.callout-icon, \.markdown-embed, input\[type="checkbox"\]\) \{\n {2}all: revert;/,
+    );
+  });
+  test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
+    assert.equal(
+      conv(
+        ".markdown-rendered pre:not(:hover)>button.copy-code-button { display: none }",
+      ),
+      ".markdown-rendered pre:not(:hover)>button:where(.clipboard-button):not(.qt-0) { display: none }",
+    );
+  });
+  test("search is Obsidian's prompt: its classes stay, the overlay is the modal container", () => {
+    assert.equal(
+      conv(".prompt .suggestion-item.is-selected { color: red }"),
+      ".prompt .suggestion-item.is-selected { color: red }",
+    );
+    assert.equal(
+      conv(".modal-container.mod-dim .prompt { color: red }"),
+      ":where(.search-container):not(.qt-0).mod-dim .prompt { color: red }",
+    );
+    assert.equal(conv(".modal-container .modal { color: red }"), "");
+    assert.equal(conv(".card-title { font-size: 20px }"), "");
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.search > \.search-container:not\(\.active\)\) \{\n {2}display: none !important;/,
+    );
   });
 });

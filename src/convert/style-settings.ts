@@ -51,11 +51,62 @@ export interface ResolvedStyleSettings {
 
 const SETTINGS_RE = /\/\*!?\s*@settings[\r\n]+?([\s\S]+?)\*\//g;
 
-/** The plugin's detect-indent: replace tabs with the file's space indent, else 4 spaces. */
+/**
+ * The plugin replaces tabs with the block's indent as `detect-indent` (7)
+ * finds it, when that's spaces, else with 4 spaces. detect-indent takes the
+ * most frequent change in indentation between lines, not the smallest indent:
+ * Micro Mike's block indents with tabs and has a few 4-space steps at 12+.
+ */
+function detectIndent(src: string): { type?: "s" | "t"; amount: number } {
+  const count = (ignoreSingleSpaces: boolean) => {
+    const used = new Map<string | undefined, [number, number]>();
+    let prevAmount = 0;
+    let prevType: string | undefined;
+    let key: string | undefined;
+    for (const line of src.split(/\n/g)) {
+      if (!line) continue;
+      const m = /^(?:( )+|\t+)/.exec(line);
+      if (m === null) {
+        prevAmount = 0;
+        prevType = "";
+        continue;
+      }
+      const amount = m[0].length;
+      const type = m[1] ? "s" : "t";
+      if (ignoreSingleSpaces && type === "s" && amount === 1) continue;
+      if (type !== prevType) prevAmount = 0;
+      prevType = type;
+      let weight = 0;
+      const diff = amount - prevAmount;
+      prevAmount = amount;
+      if (diff === 0) weight++;
+      else key = type + String(Math.abs(diff));
+      const e = used.get(key);
+      used.set(key, e === undefined ? [1, 0] : [e[0] + 1, e[1] + weight]);
+    }
+    return used;
+  };
+  let used = count(true);
+  if (used.size === 0) used = count(false);
+  let best: string | undefined;
+  let max = 0;
+  let maxWeight = 0;
+  for (const [k, [n, w]] of used)
+    if (n > max || (n === max && w > maxWeight)) {
+      max = n;
+      maxWeight = w;
+      best = k;
+    }
+  if (best === undefined) return { amount: 0 };
+  return { type: best[0] as "s" | "t", amount: Number(best.slice(1)) };
+}
+
 function detabbed(src: string): string {
-  const indents = [...src.matchAll(/^( +)\S/gm)].map((m) => m[1]!.length);
-  const unit = indents.length ? Math.min(...indents) : 4;
-  return src.replace(/\t/g, " ".repeat(unit || 4));
+  const { type, amount } = detectIndent(src);
+  return src.replace(
+    /\t/g,
+    type === "s" && amount ? " ".repeat(amount) : "    ",
+  );
 }
 
 export function parseStyleSettings(css: string): {
@@ -87,13 +138,45 @@ export function parseStyleSettings(css: string): {
 const optionValue = (o: string | { value: string } | undefined) =>
   typeof o === "string" ? o : o?.value;
 
+const nonEmpty = (v: unknown): v is string =>
+  typeof v === "string" && v.trim() !== "";
+
+/** Option values as the plugin normalises them; malformed options are left out. */
+function validOptions(options: StyleSettingDef["options"]): string[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((o) =>
+    nonEmpty(o)
+      ? [o]
+      : o && typeof o === "object" && nonEmpty(o.label) && nonEmpty(o.value)
+        ? [o.value]
+        : [],
+  );
+}
+
 export function resolveStyleSettings(
   sections: StyleSettingsSection[],
   user: StyleSettingsExport = {},
 ): ResolvedStyleSettings {
   const config: Record<string, Record<string, StyleSettingDef>> = {};
-  for (const s of sections)
-    for (const st of s.settings) if (st?.id) (config[s.id] ??= {})[st.id] = st;
+  // The plugin keeps the first section with an id, and within a section the
+  // first valid setting with an id (Baseline's "Colorful headings" heading
+  // shadows the class-select after it, whose classes Obsidian never applies).
+  const sectionIds = new Set<string>();
+  for (const s of sections) {
+    if (sectionIds.has(s.id)) continue;
+    sectionIds.add(s.id);
+    for (const st of s.settings) {
+      if (!st?.id || config[s.id]?.[st.id]) continue;
+      if (st.type === "class-select" || st.type === "variable-select") {
+        // The plugin (1.0.9) only accepts non-empty string options, or objects
+        // with non-empty string label and value; a select without any is
+        // dropped whole (AnuPpuccin's numeric `value: 100` weights).
+        const options = validOptions(st.options);
+        if (!options.length) continue;
+        (config[s.id] ??= {})[st.id] = { ...st, options };
+      } else (config[s.id] ??= {})[st.id] = st;
+    }
+  }
   const get = (sec: string, id: string) => user[`${sec}@@${id}`];
 
   // --- classes (initClasses) ---
@@ -166,10 +249,16 @@ export function resolveStyleSettings(
     }
     applied.push(key);
   }
-  const block = (sel: string, entries: [string, string][]) =>
-    entries.length
-      ? `${sel} {\n${entries.map(([k, v]) => `  --${k}: ${v};`).join("\n")}\n}\n`
+  // An id that isn't a valid custom property name (Minimal's
+  // `cards-background-hover (hover)`) makes an invalid declaration: the browser
+  // drops just that line, but Quartz's minifier rejects the whole block.
+  const validName = (k: string) => /^[\w-]+$/.test(k);
+  const block = (sel: string, entries: [string, string][]) => {
+    const valid = entries.filter(([k]) => validName(k));
+    return valid.length
+      ? `${sel} {\n${valid.map(([k, v]) => `  --${k}: ${v};`).join("\n")}\n}\n`
       : "";
+  };
   const css =
     block("body.css-settings-manager", general) +
     block("body.theme-light.css-settings-manager", light) +
