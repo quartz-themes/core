@@ -100,11 +100,16 @@ describe("selector rewriting", () => {
   });
 
   test("bare form controls don't reach Quartz chrome", () => {
-    assert.equal(conv("button { display: inline-flex }"), "");
+    // Buttons in notes (the code block's copy button) get Obsidian's button rules.
+    assert.equal(
+      conv("button { display: inline-flex }"),
+      "button:where(.markdown-rendered *) { display: inline-flex }",
+    );
     assert.equal(
       conv(".theme-dark button:not(.clickable-icon):hover { color: red }"),
-      "",
+      ':where(body):is([saved-theme="dark"] *) button:not(.clickable-icon):hover:where(.markdown-rendered *) { color: red }',
     );
+    assert.equal(conv(".modal button { color: red }"), "");
     assert.equal(
       conv(".search button { color: red }"),
       ".search button { color: red }",
@@ -1074,6 +1079,55 @@ describe("compose", () => {
     assert.match(
       main,
       /:where\(\.folder-outer:not\(\.open\)\) \{\n {2}display: none !important;/,
+    );
+  });
+});
+
+describe("renamed elements", () => {
+  test("internal-link rules leave tags alone, which Quartz also marks as internal links", () => {
+    assert.equal(
+      conv(".markdown-rendered .internal-link { color: red }"),
+      ".markdown-rendered .internal-link:where(:not(.tag)) { color: red }",
+    );
+    assert.equal(
+      conv("a.internal-link:hover::after { content: 'x' }"),
+      "a.internal-link:hover:where(:not(.tag))::after { content: 'x' }",
+    );
+  });
+  test("folded callouts hide their content as Obsidian's inline style does; embeds start from UA styles", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.markdown-preview-view \.callout\.is-collapsed > \.callout-content\) \{\n {2}display: none !important;/,
+    );
+    assert.match(
+      main,
+      /\.callout-icon, \.markdown-embed, input\[type="checkbox"\]\) \{\n {2}all: revert;/,
+    );
+  });
+  test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
+    assert.equal(
+      conv(
+        ".markdown-rendered pre:not(:hover)>button.copy-code-button { display: none }",
+      ),
+      ".markdown-rendered pre:not(:hover)>button:where(.clipboard-button):not(.qt-0) { display: none }",
+    );
+  });
+  test("search is Obsidian's prompt: its classes stay, the overlay is the modal container", () => {
+    assert.equal(
+      conv(".prompt .suggestion-item.is-selected { color: red }"),
+      ".prompt .suggestion-item.is-selected { color: red }",
+    );
+    assert.equal(
+      conv(".modal-container.mod-dim .prompt { color: red }"),
+      ":where(.search-container):not(.qt-0).mod-dim .prompt { color: red }",
+    );
+    assert.equal(conv(".modal-container .modal { color: red }"), "");
+    assert.equal(conv(".card-title { font-size: 20px }"), "");
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.search > \.search-container:not\(\.active\)\) \{\n {2}display: none !important;/,
     );
   });
 });

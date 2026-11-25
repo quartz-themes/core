@@ -58,6 +58,8 @@ export const APP_ONLY_PREFIXES = [
   "release-notes",
   "is-grabbing",
   "is-being-dragged",
+  // Obsidian's UI cards; Quartz's search results and bases cards are `.card-title` too
+  "card-title",
   // Pre-1.0 explorer markup, gone from Obsidian (now `.tree-item-icon.collapse-icon`):
   // themes' rules for it are dead there. Quartz's explorer carried the class, so
   // Catppuccin's `display: none` hid the only way to open a folder.
@@ -169,7 +171,7 @@ export const CONTENT_ROOT_CLASSES = [
  * And rules: Quartz draws one above its footer, outside the note.
  */
 export const BARE_TAGS: Record<string, "drop" | "content"> = {
-  button: "drop",
+  button: "content",
   select: "drop",
   textarea: "drop",
   input: "content",
@@ -218,6 +220,24 @@ export const LEAF_TYPE_MAP: Record<string, string> = {
  */
 export const RENAMES: Record<string, string> = {
   "is-unresolved": ".broken",
+  // Code blocks' copy button: Quartz's sits where Obsidian's does (top right of the
+  // <pre>, shown while it is hovered).
+  "copy-code-button": ".clipboard-button",
+  // Search: Quartz's search is Obsidian's quick switcher and command palette
+  // (`.prompt`, `.prompt-input`, `.prompt-results`, `.suggestion-*` are on its
+  // elements); its overlay is Obsidian's modal container (the dialogs inside it,
+  // `.modal`, stay app-only).
+  "modal-container": ".search-container",
+};
+
+/**
+ * Obsidian class → zero-specificity condition added to its compound, for
+ * elements Quartz gives more of Obsidian's classes than Obsidian does. Quartz
+ * marks tags as internal links too (`a.tag.internal-link`); Obsidian's
+ * internal-link rules never reach its tags.
+ */
+export const CLASS_QUALIFY: Record<string, string> = {
+  "internal-link": ":where(:not(.tag))",
 };
 
 /** RENAMES that must not apply when the compound also has one of these classes. */

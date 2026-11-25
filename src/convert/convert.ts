@@ -48,6 +48,7 @@ import {
   WRAPPER_MAP,
   LEAF_TYPE_MAP,
   RENAMES,
+  CLASS_QUALIFY,
   RENAME_UNLESS,
   TAG_REWRITES,
   CONTENT_WRAPPERS,
@@ -2272,20 +2273,31 @@ function processCompound(
           // A Prism token kind Quartz doesn't mark (`.token.parameter`).
           replace(node, nodesOf(`[data-token-type="prism-${v}"]`));
           concrete = named = true;
-        } else if (isAppOnly(v)) {
-          return { drop: "appOnly" };
         } else if (
           RENAMES[v] !== undefined &&
           !(RENAME_UNLESS[v] ?? []).some(hasClass)
         ) {
+          // Before the app-only check: a renamed class may share an app-only
+          // prefix (`modal-container`).
           replace(node, [
             ...nodesOf(`:where(${RENAMES[v]})`),
             ...pad(CLASS_SPEC),
           ]);
           concrete = named = true;
+        } else if (isAppOnly(v)) {
+          return { drop: "appOnly" };
         } else {
           concrete = named = true;
           if (CONTENT_ROOT_CLASSES.includes(v)) contentRoot = true;
+          if (CLASS_QUALIFY[v]) {
+            const anchor = nodes.find(isPseudoElement);
+            const last = nodes[nodes.length - 1]!;
+            for (const q of nodesOf(CLASS_QUALIFY[v])) {
+              if (anchor) anchor.parent!.insertBefore(anchor, q);
+              else last.parent!.insertAfter(last, q);
+            }
+            changed = true;
+          }
         }
         break;
       }

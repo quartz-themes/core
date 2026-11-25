@@ -2,6 +2,25 @@
 
 ### Patch Changes
 
+- Code blocks' copy button: Obsidian's `.copy-code-button` rules style Quartz's clipboard
+  button, which sits where Obsidian's does (top right, shown on hover). Bare `button` rules
+  apply to buttons in notes, as in Obsidian, and still not to Quartz's own controls.
+- Internal-link rules no longer reach tags: Quartz marks tags as internal links too, which
+  underlined them and gave them the link colour (Minimal, Things, Border).
+- Folded callouts stay folded: Obsidian hides their content with an inline style, which the
+  content reset undid in Quartz (every theme showed folded callouts open).
+- Note embeds start from UA styles like the rest of the note, so Quartz's transclusion
+  padding and border don't show through Obsidian's.
+- Search is styled as Obsidian's quick switcher (about 400 themes style it): with
+  `@quartz-community/search`'s Obsidian classes, `.prompt`, `.prompt-input`,
+  `.prompt-results` and `.suggestion-*` rules apply, and `.modal-container` rules reach its
+  overlay. The overlay stays hidden while closed and fixed over the page. Open, it shows
+  two windows where Obsidian puts its switcher: the page preview, styled as the theme's
+  hover popover and as tall as the switcher, left of the switcher. Result titles and
+  matches inherit their text styles as in Obsidian, not Quartz's heading and highlight
+  styles.
+- Obsidian's `.card-title` (its own UI cards) no longer styles Quartz's search results and
+  bases cards, which use the same class.
 - Obsidian's external-link icon (`public/external-link.svg`, a file shipped inside the app)
   is inlined into the bundled app.css; it 404'd on Quartz sites. The bundled app.css is
   regenerated with this release's converter.

@@ -37,9 +37,99 @@ export const BRIDGE: Record<string, string> = {
  * are unaffected by `all`. Quartz's code-block <figure> has no counterpart in
  * Obsidian (its `pre` sits in the note directly), so it doesn't get the UA's
  * 40px figure margins.
+ *
+ * Obsidian hides a folded callout's content with an inline `display: none`,
+ * which only a theme's `!important` overrides; Quartz folds it to a
+ * zero-height grid row, which the reset (and a theme's padding) undoes. First
+ * in the layer at zero specificity, `!important`: as the inline style.
+ * Quartz's search overlay is Obsidian's modal container, which Obsidian only
+ * renders while a dialog is open: closed, it stays hidden, and open it stays
+ * fixed over the page (Obsidian's is absolute, under its own layers). Open,
+ * it is two windows where Obsidian puts its quick switcher: the page preview
+ * (a popover, as tall as the switcher) left of the switcher (`.prompt`), each
+ * as wide as the theme's switcher. A result stacks its title, tags and
+ * excerpt, which Obsidian wraps in one `.suggestion-content`. Its titles and matches
+ * inherit their text styles, as Obsidian's divs do, not Quartz's heading and
+ * highlight styles.
  */
-export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, input[type="checkbox"]) {
+export const CONTENT_RESET = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, .markdown-embed, input[type="checkbox"]) {
   all: revert;
+}
+:where(.markdown-preview-view .callout.is-collapsed > .callout-content) {
+  display: none !important;
+}
+:where(.search > .search-container:not(.active)) {
+  display: none !important;
+}
+:where(.search > .search-container) {
+  position: fixed !important;
+  z-index: var(--search-z-index, 999) !important;
+}
+:where(.search .prompt, .search .prompt > *) {
+  margin: 0;
+}
+:where(.search > .search-container > .search-space) {
+  position: absolute;
+  inset-inline: 0;
+  top: calc((100vh - var(--prompt-max-height, 70vh)) / 2);
+  width: auto;
+  margin: 0;
+  padding: 0 var(--size-4-4, 16px);
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: var(--size-4-4, 16px);
+}
+:where(.search .search-space > .prompt) {
+  position: relative !important;
+  top: auto !important;
+  flex: 0 1 var(--prompt-width, 700px);
+  align-self: flex-start;
+  min-width: 0;
+}
+:where(.search .prompt > .search-layout) {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+:where(.search .search-space > .search-preview) {
+  position: relative !important;
+  z-index: auto !important;
+  flex: 0 1 var(--prompt-width, 700px);
+  min-width: 0;
+  height: auto;
+  contain: size;
+}
+:where(.search .search-space:not(.display-results) > .search-preview) {
+  display: none !important;
+}
+:where(.search .search-preview > .markdown-embed) {
+  width: auto !important;
+  max-height: none !important;
+  height: 100%;
+  padding: var(--size-4-2, 8px) var(--size-4-4, 16px) !important;
+}
+:where(.search .prompt-results) {
+  border-radius: 0;
+}
+:where(.search .suggestion-item) {
+  flex-direction: column;
+}
+:where(.search .suggestion-title) {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+:where(.search .suggestion-highlight) {
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border-radius: 0;
+  padding: 0;
 }
 :where(.markdown-preview-view) :where(figure[data-rehype-pretty-code-figure]) {
   margin: 0;
