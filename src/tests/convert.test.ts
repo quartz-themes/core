@@ -1278,3 +1278,24 @@ describe("property inputs", () => {
       assert.equal(conv(`${sel} { color: red }`), `${sel} { color: red }`);
   });
 });
+
+describe("folding", () => {
+  test("`:not(.allow-fold-headings)` tests Quartz's fold script; as an ancestor the class is elided", () => {
+    assert.equal(
+      conv(
+        ".markdown-preview-view:not(.allow-fold-headings) .heading-collapse-indicator { display: none }",
+      ),
+      ".markdown-preview-view:not(.allow-fold-headings) .heading-collapse-indicator { display: none }",
+    );
+    assert.equal(
+      conv(
+        ".markdown-preview-view:not(.allow-fold-lists) .list-collapse-indicator { display: none }",
+      ),
+      ".markdown-preview-view:not(.allow-fold-lists) .list-collapse-indicator { display: none }",
+    );
+    assert.equal(
+      conv(".markdown-preview-view.allow-fold-headings h2 { color: red }"),
+      ".markdown-preview-view:not(.qt-0) h2 { color: red }",
+    );
+  });
+});

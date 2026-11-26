@@ -1773,6 +1773,9 @@ function notStandIns(sel: SSelector): boolean {
   return changed;
 }
 
+/** The reading view's folding classes, which Quartz's fold script sets. */
+const FOLD_STATE = /^\.allow-fold-(headings|lists)$/;
+
 /** Classes of Obsidian's properties block: an `input` under one is a property's. */
 const METADATA_SCOPE =
   /^metadata-(container|content|properties|property|property-key|property-value)$/;
@@ -2405,6 +2408,16 @@ function processLogical(
   const altTags: string[] = [];
   let allTags = true;
   for (const inner of [...node.nodes]) {
+    // `:not(.allow-fold-headings)`: folding is off. Quartz's fold script puts
+    // the class on the reading view when it folds, so the test stays. (As an
+    // ancestor the class is elided like the reading view's other classes:
+    // folding is on in Obsidian by default, and themes space notes for the
+    // arrows with it.)
+    if (node.value === ":not" && FOLD_STATE.test(inner.toString().trim())) {
+      concrete = true;
+      allElided = false;
+      continue;
+    }
     // A never-matching specificity placeholder (see splitMixedIs).
     if (
       /^(#qt-0|\.qt-0|qt-0)( (#qt-0|\.qt-0|qt-0))*$/.test(
