@@ -1214,6 +1214,15 @@ describe("renamed elements", () => {
       /\.callout-icon, \.markdown-embed, input\[type="checkbox"\]\) \{\n {2}all: revert;/,
     );
   });
+  test("the content revert skips sized images, whose width and height attributes it would discard", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    const revert = main.match(
+      /(:where\(\.markdown-preview-view\) :where\([^{]*\)) \{\n {2}all: revert;/,
+    )?.[1];
+    assert.ok(revert, "the content revert rule is emitted");
+    assert.match(revert, /[ (]img:not\(\[width\], \[height\]\)[,)]/);
+    assert.doesNotMatch(revert, /[ (]img[,)]/);
+  });
   test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
     assert.equal(
       conv(
