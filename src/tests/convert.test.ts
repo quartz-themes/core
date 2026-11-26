@@ -1214,6 +1214,13 @@ describe("renamed elements", () => {
       /\.callout-icon, \.markdown-embed, input\[type="checkbox"\]\) \{\n {2}all: revert;/,
     );
   });
+  test("the content reset keeps Quartz's code line-number counter scoped to each code block", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.markdown-preview-view\) :where\(pre > code\) \{\n {2}counter-reset: line;\n\}/,
+    );
+  });
   test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
     assert.equal(
       conv(

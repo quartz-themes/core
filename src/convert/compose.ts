@@ -134,6 +134,12 @@ export const CONTENT_RESET = `:where(.markdown-preview-view .callout.is-collapse
 :where(.markdown-preview-view) :where(figure[data-rehype-pretty-code-figure]) {
   margin: 0;
 }
+/* Quartz numbers a code block's lines with a counter that "pre > code" scopes
+   (counter-reset: line). The revert discards that scope, and without it every
+   line starts its own counter and reads 1. */
+:where(.markdown-preview-view) :where(pre > code) {
+  counter-reset: line;
+}
 /* The search button's label and a Bases table's group property are Obsidian's
    faint UI text (a search field's placeholder, a group heading's key). On plain
    Quartz they are --darkgray, for contrast; under a theme that is
