@@ -52,7 +52,7 @@ export const BRIDGE: Record<string, string> = {
  * inherit their text styles, as Obsidian's divs do, not Quartz's heading and
  * highlight styles.
  */
-export const CONTENT_REVERT = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img, figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, .markdown-embed, input[type="checkbox"]) {
+export const CONTENT_REVERT = `:where(.markdown-preview-view) :where(p, h1, h2, h3, h4, h5, h6, a, ul, ol, li, blockquote, hr, section, table, thead, tbody, tr, th, td, code, pre, mark, strong, em, b, i, del, s, sup, sub, img:not([width], [height]), figure, figcaption, details, summary, kbd, .text-highlight, .callout, .callout-title, .callout-title-inner, .callout-content, .callout-icon, .markdown-embed, input[type="checkbox"]) {
   all: revert;
 }`;
 export const CONTENT_RESET = `:where(.markdown-preview-view .callout.is-collapsed > .callout-content) {
