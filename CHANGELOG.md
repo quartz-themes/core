@@ -1,4 +1,25 @@
-## 3.1.2
+## 3.2.0
+
+### Minor Changes
+
+- Obsidian's per-block wrappers are styled natively. Quartz now renders them
+  (`div.el-p > p`, `div.el-h2 > h2`, from `@quartz-community/rehype-obsidian` 1.5.0 through
+  `@quartz-community/obsidian-flavored-markdown` 2.4.0), so the converter's wrapper emulation
+  is gone. Rules for a wrapper's child reach past Quartz's own elements (the table's scroll
+  container, the code block's figure, the diagram box). Counts of the sizer's children
+  (`:nth-child`) skip Obsidian's UI around the blocks. A div between the reading view and its
+  blocks is the sizer, and universal rules reach the note root as the sizer. Heading anchors
+  aren't internal links. A site without the wrappers gets a warning at build time.
+- Rules for Obsidian's property inputs reach Quartz's read-only properties, with the same
+  specificity: `input.metadata-property-key-input` styles the key's span, and number and date
+  inputs style Quartz's divs. Classless inputs under the properties block are mapped by their
+  `[type]`, and checkboxes are left alone. Property keys get Obsidian's label colour, size and
+  padding.
+- Obsidian's fold arrows show only where Quartz folds: `:not(.allow-fold-headings)` and
+  `:not(.allow-fold-lists)` test the classes Quartz's fold script puts on the reading view
+  (`foldHeadings` / `foldLists` in obsidian-flavored-markdown). As an ancestor, the class is
+  still treated as present, as Obsidian folds by default, so themes keep the space they leave
+  for the arrows.
 
 ### Patch Changes
 
