@@ -237,11 +237,13 @@ export const RENAMES: Record<string, string> = {
 /**
  * Obsidian class → zero-specificity condition added to its compound, for
  * elements Quartz gives more of Obsidian's classes than Obsidian does. Quartz
- * marks tags as internal links too (`a.tag.internal-link`); Obsidian's
- * internal-link rules never reach its tags.
+ * marks tags as internal links too (`a.tag.internal-link`), and the anchor in
+ * each heading (`h2 > a[role="anchor"]`), which Obsidian doesn't render:
+ * Obsidian's internal-link rules never reach either (Al Dente's `»` after
+ * links, Nostromo's ` [LINK]`, on every heading).
  */
 export const CLASS_QUALIFY: Record<string, string> = {
-  "internal-link": ":where(:not(.tag))",
+  "internal-link": ':where(:not(.tag, [role="anchor"]))',
 };
 
 /** RENAMES that must not apply when the compound also has one of these classes. */

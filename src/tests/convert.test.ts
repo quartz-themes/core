@@ -62,24 +62,24 @@ describe("selector rewriting", () => {
       conv(
         ".markdown-preview-view .markdown-preview-sizer > div { width: 1px }",
       ),
-      ".markdown-preview-view:not(.qt-0)>:not(qt-0) { width: 1px }",
+      ".markdown-preview-view:not(.qt-0)>div { width: 1px }",
     );
     assert.equal(
       conv(".markdown-preview-section > div:has(img) { width: 1px }"),
-      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0):has(img) { width: 1px }",
+      ":where(.markdown-preview-view):not(.qt-0)>div:has(img) { width: 1px }",
     );
     assert.equal(
       conv("div.markdown-preview-sizer > div::before { color: red }"),
-      ":where(.markdown-preview-view):not(qt-0):not(.qt-0)>:not(qt-0)::before { color: red }",
+      ":where(.markdown-preview-view):not(qt-0):not(.qt-0)>div::before { color: red }",
     );
-    // Obsidian's per-block wrapper div doesn't exist in Quartz.
+    // The divs are Obsidian's per-block wrappers, which Quartz renders too.
     assert.equal(
       conv(".markdown-preview-section > div h1 { color: red }"),
-      ":where(.markdown-preview-view):not(.qt-0):not(qt-0) h1 { color: red }",
+      ":where(.markdown-preview-view):not(.qt-0)>div h1 { color: red }",
     );
     assert.equal(
       conv(".markdown-preview-sizer > div > p { color: red }"),
-      ":where(.markdown-preview-view):not(.qt-0):not(qt-0)>p { color: red }",
+      ":where(.markdown-preview-view):not(.qt-0)>div>p { color: red }",
     );
   });
 
@@ -488,52 +488,50 @@ describe("selector rewriting", () => {
   });
 
   test("inline headings stack, each alone in its block as in Obsidian", () => {
-    assert.match(
+    // Adrenaline: each heading is alone in its wrapper, in Quartz as in
+    // Obsidian, so an inline heading needs nothing of its own.
+    assert.equal(
       conv(".markdown-rendered h1 { display: inline }"),
-      /h1:where\(\.markdown-preview-view > \*\) \{ display: block; width: fit-content; margin-block: 0 !important \}/,
+      ".markdown-rendered h1 { display: inline }",
     );
-    assert.doesNotMatch(conv("h2 { display: inline-block }"), /fit-content/);
-    assert.doesNotMatch(conv("span { display: inline }"), /fit-content/);
   });
 
-  test("Obsidian's block wrappers (.el-*) are Quartz's blocks", () => {
-    // The wrapper and its element: the element, with the wrapper's specificity.
+  test("a block in its wrapper behind Quartz's own element", () => {
+    // The table's scroll container, always there.
     assert.equal(
-      conv("div.el-p > p { margin: 0 }"),
-      "p:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin: 0 }",
+      conv(".el-table > table { width: 100% }"),
+      ".el-table>:where(.table-container) > table { width: 100% }",
     );
-    // A wrapper's any-child is its block (Baseline's lists after paragraphs).
+    // Syntax highlighting's figure, or a bare pre without it.
     assert.equal(
-      conv(".el-p + div:is(.el-ul, .el-ol) > * { margin-top: 20px }"),
-      ":where(p):not(.qt-0)+:where(ul, ol):not(.qt-0):not(qt-0):where(.markdown-preview-view > *) { margin-top: 20px }",
+      conv(".el-pre > pre { margin: 0 }"),
+      ".el-pre>pre,.el-pre>:where([data-rehype-pretty-code-figure]) > pre { margin: 0 }",
     );
-    // The div a wrapper sits in is the sizer: Quartz's note root.
+    // The diagram's expand controls.
     assert.equal(
-      conv(".markdown-rendered div > .el-ul > ul { margin-top: -5px }"),
-      ".markdown-rendered ul:where(.markdown-preview-view > *):not(qt-0):not(.qt-0) { margin-top: -5px }",
+      conv(".el-pre > .mermaid { margin: 0 }"),
+      ".el-pre>:where(.mermaid-diagram) > .mermaid { margin: 0 }",
     );
-    // Also as a descendant (Willemstad), and only the note's own blocks: the
-    // footnotes' hr has no wrapper.
+  });
+
+  test("Obsidian's block wrappers (.el-*) are Quartz's too", () => {
+    // Quartz renders Obsidian's per-block wrappers (rehype-obsidian): rules
+    // for them stay as they are.
+    for (const css of [
+      "div.el-p > p { margin: 0 }",
+      ".el-p + div:is(.el-ul, .el-ol) > * { margin-top: 20px }",
+      ".el-hr hr { margin: 0 }",
+      ".el-table + div > h2 { margin-top: 3em }",
+      ".el-pre { border: 1px solid red }",
+      "div:is(.el-p, .el-table) + div > h3 { color: red }",
+      ".el-hr { padding: 12px 0 }",
+    ])
+      assert.equal(conv(css), css);
     assert.equal(
-      conv(".el-hr hr { margin: 0 }"),
-      "hr:where(.markdown-preview-view > *):not(.qt-0) { margin: 0 }",
-    );
-    // "A heading after a table": Quartz's table block is .table-container,
-    // and the heading's own wrapper goes.
-    assert.equal(
-      conv(".el-table + div > h2 { margin-top: 3em }"),
-      ":where(.table-container):not(.qt-0)+h2:not(qt-0) { margin-top: 3em }",
-    );
-    // Code blocks: the highlighted figure or a bare pre, never a figure type
-    // selector (theme figure rules stay off Quartz's code figure).
-    assert.equal(
-      conv(".el-pre { border: 1px solid red }"),
-      ":where([data-rehype-pretty-code-figure], :not([data-rehype-pretty-code-figure]) > pre):not(.qt-0) { border: 1px solid red }",
-    );
-    // Lists of wrappers inside :is().
-    assert.match(
-      conv("div:is(.el-p, .el-table) + div > h3 { color: red }"),
-      /^:where\(p, \.table-container\)/,
+      conv(
+        '.markdown-preview-sizer > [class^="el-"] ~ [class^="el-"] { padding-top: 28px }',
+      ),
+      ':where(.markdown-preview-view):not(.qt-0)>[class^="el-"]~[class^="el-"] { padding-top: 28px }',
     );
   });
 
@@ -546,6 +544,85 @@ describe("selector rewriting", () => {
     assert.match(out, /:first-child/);
     assert.doesNotMatch(out, /\+/);
     assert.doesNotMatch(out, /pusher/);
+  });
+
+  test("a count of the sizer's children skips Obsidian's UI around the blocks", () => {
+    // Material Ocean: every block after the header gets a top margin.
+    assert.equal(
+      conv(
+        ".markdown-preview-section > :nth-child(2) ~ div { margin-block-start: 15px }",
+      ),
+      ":where(.markdown-preview-view):not(.qt-0)>div:not(.qt-0) { margin-block-start: 15px }",
+    );
+    // The third child is the first block; every fourth from the second, shifted.
+    assert.equal(
+      conv(".markdown-preview-sizer > div:nth-child(3) { color: red }"),
+      ":where(.markdown-preview-view):not(.qt-0)>div:nth-child(1) { color: red }",
+    );
+    assert.equal(
+      conv(".markdown-preview-sizer > div:nth-child(4n+2) { color: red }"),
+      ":where(.markdown-preview-view):not(.qt-0)>div:nth-child(4n+0) { color: red }",
+    );
+    // The first child is the pusher, the last the footer: nothing in Quartz.
+    assert.equal(
+      conv(".markdown-preview-sizer > div:first-child { color: red }"),
+      "",
+    );
+    assert.equal(
+      conv(".markdown-preview-section > div:last-child { color: red }"),
+      "",
+    );
+    // The last block, a count of another type, and a filtered count are kept.
+    assert.equal(
+      conv(".markdown-preview-sizer > div:nth-last-child(2) { color: red }"),
+      ":where(.markdown-preview-view):not(.qt-0)>div:nth-last-child(1) { color: red }",
+    );
+    assert.match(
+      conv(
+        ".markdown-preview-sizer > div:nth-last-child(1 of div.el-p) { color: red }",
+      ),
+      /nth-last-child\(1 of div\.el-p\)/,
+    );
+  });
+
+  test("a div between the reading view and its blocks is the sizer", () => {
+    // Baseline: lists move up a half line in their wrappers. The original stays
+    // for an embedded note's blocks, in the embed's div.
+    assert.equal(
+      conv(".markdown-rendered div > .el-ul > ul { margin-top: -5px }"),
+      ".markdown-rendered div>.el-ul>ul,.markdown-rendered:not(qt-0)>.el-ul>ul { margin-top: -5px }",
+    );
+    assert.equal(
+      conv(".markdown-rendered div > ul { margin-top: -5px }"),
+      ".markdown-rendered div > ul { margin-top: -5px }",
+    );
+  });
+
+  test("any child of a block wrapper is the block, past Quartz's element around it", () => {
+    // Hidontknow: blocks lose their margins, the code block's `pre` in syntax
+    // highlighting's figure too.
+    assert.equal(
+      conv(".el-table > * { margin: 0 }"),
+      ".el-table>*:where(:not(.table-container)),.el-table>:where(.table-container) > * { margin: 0 }",
+    );
+    assert.equal(
+      conv(".el-pre > :first-child { margin: 0 }"),
+      ".el-pre>:first-child:where(:not([data-rehype-pretty-code-figure], .mermaid-diagram)),.el-pre>:where([data-rehype-pretty-code-figure]) > :first-child,.el-pre>:where(.mermaid-diagram) > :first-child:where(.mermaid) { margin: 0 }",
+    );
+    // A paragraph's children are Obsidian's too.
+    assert.equal(conv(".el-p > * { margin: 0 }"), ".el-p > * { margin: 0 }");
+  });
+
+  test("a child that isn't a table isn't the table's container either", () => {
+    // Seamless View: no space above a heading after a table.
+    assert.equal(
+      conv("div:has(> :not(h2, table)) + div { margin-top: 1em }"),
+      "div:has(>:not(h2,table,:where(.table-container)))+div { margin-top: 1em }",
+    );
+    assert.equal(
+      conv(".callout :not(table) { color: red }"),
+      ".callout :not(table) { color: red }",
+    );
   });
 
   test("property pills are styled; their editing parts are app-only", () => {
@@ -665,10 +742,10 @@ describe("selector rewriting", () => {
       "",
     );
     assert.equal(conv("div.markdown-reading-view > div { color: red }"), "");
-    // The block wrapper's siblings are block wrappers too.
+    // Block wrappers are Quartz's elements too.
     assert.equal(
       conv(".markdown-preview-sizer > :nth-child(2) ~ div { margin-top: 1em }"),
-      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { margin-top: calc(1 * var(--font-text-size)) }",
+      ":where(.markdown-preview-view):not(.qt-0)>div:not(.qt-0) { margin-top: 1em }",
     );
   });
 
@@ -778,14 +855,14 @@ describe("selector rewriting", () => {
   });
 
   test("the block wrapper can be the element between the note and a block", () => {
-    // Micro Mike: `:not(:is(li, ul, ol))` is the wrapper for top-level blocks.
+    // Micro Mike: `:not(:is(li, ul, ol))` is the block wrapper for top-level
+    // blocks, in Quartz as in Obsidian.
     assert.equal(
       conv(
         ".markdown-preview-section :not(:is(li, ul, ol)) > h2 { margin-top: 20px }",
       ),
-      ":where(.markdown-preview-view):not(.qt-0) :not(:is(li,ul,ol))>h2,:where(.markdown-preview-view):not(.qt-0):not(qt-0)>h2 { margin-top: 20px }",
+      ":where(.markdown-preview-view):not(.qt-0) :not(:is(li,ul,ol))>h2 { margin-top: 20px }",
     );
-    // A named element in between isn't the wrapper.
     assert.equal(
       conv(".markdown-rendered .callout > p { color: red }"),
       ".markdown-rendered .callout > p { color: red }",
@@ -817,8 +894,9 @@ describe("selector rewriting", () => {
     );
   });
 
-  test("universal rules reach the blocks through their wrappers", () => {
-    // SpectrumPlus: headings inherit (`--h2-font: inherit`) the wrapper's font.
+  test("universal rules reach the note root as Obsidian's sizer", () => {
+    // Museifu, SpectrumPlus: the sizer's text has the universal rule's font;
+    // Quartz's root is also the view, which app.css gives a font of its own.
     assert.equal(
       conv('* { font-family: "JetBrains Mono"; margin: 0 }'),
       '* { font-family: "JetBrains Mono"; margin: 0 } :where(.markdown-preview-view):not(.qt-0):not(#qt-0) { font-family: "JetBrains Mono" }',
@@ -831,58 +909,23 @@ describe("selector rewriting", () => {
   });
 
   test("a block wrapper's box is around the block, not inside it", () => {
-    // Discordian: the wrapper's side padding moves the block in; its zero and
-    // auto margins don't replace the block's own, which collapse through it.
+    // Discordian: the wrapper's padding and margins are its own, around the
+    // block, in Quartz as in Obsidian.
     assert.equal(
       conv(
         ".markdown-preview-section > div { padding-left: 4rem; padding-right: 2rem; margin: 0 auto 0 auto; max-width: 100% }",
       ),
-      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-left: 4rem; margin-right: 2rem; max-width: min(100%, calc(100% - 4rem - 2rem)) }",
-    );
-    // Its width holds that padding: the block stays within what it leaves.
-    assert.equal(
-      conv(".markdown-preview-section > div { padding: 0 2rem }"),
-      ":where(.markdown-preview-view):not(.qt-0)>:not(qt-0) { margin-right: 2rem; margin-left: 2rem; max-width: calc(100% - 2rem - 2rem) }",
-    );
-    // Adrenaline: wrapper margins' ems are the note's text size; a zero one
-    // between neighbours leaves those blocks out of the wrapper margins.
-    assert.match(
-      conv("div.el-h2 { margin-top: var(--s, 4em) !important }"),
-      /\{ margin-top: var\(--s, calc\(4 \* var\(--font-text-size\)\)\) !important \}$/,
-    );
-    const cancelled = conv(
-      "div.el-h2 { margin-top: 4em !important } div.el-h1 + div.el-h2 { margin-top: 0em !important }",
-    );
-    assert.match(
-      cancelled,
-      /^:where\(h2\)[^{]*:where\(:not\(:where\(h1\)[^{]*\+:where\(h2\)[^{]*\)\) \{ margin-top: calc\(4 \* var\(--font-text-size\)\) !important \}$/,
-    );
-    // Office Mock: its paint is behind the block, its corners its own.
-    assert.match(
-      conv(
-        '.markdown-preview-sizer > [class^="el-"] { background: white; border-radius: 0; color: red }',
-      ),
-      /^:where\([^{]*\):where\(:not\(\.callout, pre, \[data-rehype-pretty-code-figure\]\)\) \{ background: white; border-radius: 0 \} [^{]* \{ color: red \}$/,
-    );
-    // Hidontknow: the space between blocks is the wrappers' top padding.
-    assert.match(
-      conv(
-        '.markdown-preview-sizer > [class^="el-"] ~ [class^="el-"] { padding-top: 28px }',
-      ),
-      /~:where\(p, ul, ol, [^{]*\{ margin-top: 28px \}/,
-    );
-    assert.equal(
-      conv(".el-hr { padding: 12px 0 }"),
-      ":where(hr):not(.qt-0):where(.markdown-rendered *) { margin-top: 12px; margin-bottom: 12px }",
+      ":where(.markdown-preview-view):not(.qt-0)>div { padding-left: 4rem; padding-right: 2rem; margin: 0 auto 0 auto; max-width: 100% }",
     );
   });
 
   test("block wrappers don't stop Quartz's table container scrolling", () => {
+    // The wrapper is around Quartz's scroll container, not the container itself.
     assert.equal(
       conv(
         ".markdown-preview-sizer > :nth-child(2) ~ div { overflow: visible; color: red }",
       ),
-      ":where(.markdown-preview-view):not(.qt-0)>:nth-child(2)~:not(qt-0) { color: red }",
+      ":where(.markdown-preview-view):not(.qt-0)>div:not(.qt-0) { overflow: visible; color: red }",
     );
   });
 
@@ -1150,14 +1193,14 @@ describe("compose", () => {
 });
 
 describe("renamed elements", () => {
-  test("internal-link rules leave tags alone, which Quartz also marks as internal links", () => {
+  test("internal-link rules leave tags and heading anchors alone, which Quartz also marks as internal links", () => {
     assert.equal(
       conv(".markdown-rendered .internal-link { color: red }"),
-      ".markdown-rendered .internal-link:where(:not(.tag)) { color: red }",
+      '.markdown-rendered .internal-link:where(:not(.tag, [role="anchor"])) { color: red }',
     );
     assert.equal(
       conv("a.internal-link:hover::after { content: 'x' }"),
-      "a.internal-link:hover:where(:not(.tag))::after { content: 'x' }",
+      "a.internal-link:hover:where(:not(.tag, [role=\"anchor\"]))::after { content: 'x' }",
     );
   });
   test("folded callouts hide their content as Obsidian's inline style does; embeds start from UA styles", () => {
