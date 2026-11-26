@@ -1221,6 +1221,17 @@ describe("renamed elements", () => {
       /:where\(\.markdown-preview-view\) :where\(pre > code\) \{\n {2}counter-reset: line;\n\}/,
     );
   });
+  test("code line numbers stay on one row and wrapped code hangs past them", () => {
+    const { main } = composeStylesheet({ app: "", theme: "" });
+    assert.match(
+      main,
+      /:where\(\.markdown-preview-view\) :where\(pre > code > \[data-line\]\) \{\n {2}padding-inline-start: 2rem;\n\}/,
+    );
+    assert.match(
+      main,
+      /:where\(\.markdown-preview-view\) :where\(pre > code > \[data-line\]\)::before \{\n {2}margin-inline-start: -2rem;\n {2}white-space: nowrap;\n\}/,
+    );
+  });
   test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
     assert.equal(
       conv(
