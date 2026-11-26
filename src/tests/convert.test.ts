@@ -1239,6 +1239,18 @@ describe("renamed elements", () => {
       /:where\(\.search > \.search-container:not\(\.active\)\) \{\n {2}display: none !important;/,
     );
   });
+
+  test("the search button's label and Bases group properties are the theme's faint text, below its own rules", () => {
+    const { main } = composeStylesheet({
+      app: "",
+      theme: ".search-button p { color: red }",
+    });
+    const reset = main.indexOf(
+      ":where(.search > .search-button > p, .bases-table-group-property) {\n  color: var(--text-faint);",
+    );
+    assert.ok(reset > 0);
+    assert.ok(reset < main.indexOf(".search-button p { color: red }"));
+  });
 });
 
 describe("property inputs", () => {
