@@ -134,6 +134,13 @@ export const CONTENT_RESET = `:where(.markdown-preview-view .callout.is-collapse
 :where(.markdown-preview-view) :where(figure[data-rehype-pretty-code-figure]) {
   margin: 0;
 }
+/* The search button's label and a Bases table's group property are Obsidian's
+   faint UI text (a search field's placeholder, a group heading's key). On plain
+   Quartz they are --darkgray, for contrast; under a theme that is
+   --text-normal, so they get the theme's --text-faint here. */
+:where(.search > .search-button > p, .bases-table-group-property) {
+  color: var(--text-faint);
+}
 /* Quartz's screen-reader-only elements (the footnotes' "Footnotes" heading)
    have no Obsidian counterpart: hidden, and uncounted, whatever the theme does
    to their element. */
