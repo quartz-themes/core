@@ -1,3 +1,12 @@
+## 3.2.1
+
+### Patch Changes
+
+- The search button's label and a Bases table's group property are the theme's faint text
+  (`--text-faint`), as Obsidian's search placeholder and group keys are. Quartz now colours them
+  `--darkgray` for contrast on plain sites, which a theme maps to its normal text colour. A
+  theme's own rules for them still apply.
+
 ## 3.2.0
 
 ### Minor Changes
