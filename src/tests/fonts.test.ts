@@ -133,7 +133,12 @@ body { --font-text-theme: Lora; --h1-font: Lora; --h1-color: red; }
     assert.match(out.main, /--font-text-override: var\(--bodyFont\);/);
     assert.match(out.main, /--font-monospace-override: var\(--codeFont\);/);
     assert.match(out.main, /--h1-font: var\(--headerFont\);/);
-    // The bridge no longer points Quartz's fonts at Obsidian's: no cycle.
+    // The bridge no longer points Quartz's fonts at Obsidian's: no cycle. Its
+    // colours stay.
+    assert.match(
+      out.main,
+      /:where\(body, #quartz-root, \.center\) \{\n {2}--light: var\(--background-primary\);[^}]*\n {2}--textHighlight: var\(--text-highlight-bg\);\n\}/,
+    );
     assert.doesNotMatch(out.main, /--bodyFont: var\(--font-text\)/);
     // Obsidian's own font stack (app.css) is untouched.
     assert.match(out.main, /--font-text: var\(--font-text-override\)/);
