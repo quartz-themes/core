@@ -247,6 +247,19 @@ export async function resolveTheme(
       source: "built-in",
     };
 
+  // URL (before local paths: a URL can end in .css too)
+  if (/^https?:\/\//.test(trimmed)) {
+    const css = await cached(
+      cache,
+      opts.fetch ?? fetch,
+      `url-${trimmed}`,
+      trimmed,
+      cache.ttl,
+    );
+    if (!css) throw new Error(`could not download theme from ${trimmed}`);
+    return { name: trimmed, css, source: trimmed };
+  }
+
   // Local path
   const local = path.resolve(trimmed);
   // Explicit paths only, so a theme name never collides with a folder in cwd.
@@ -274,19 +287,6 @@ export async function resolveTheme(
       /* no manifest */
     }
     return { name, css: fs.readFileSync(file, "utf8"), source: file };
-  }
-
-  // URL
-  if (/^https?:\/\//.test(trimmed)) {
-    const css = await cached(
-      cache,
-      opts.fetch ?? fetch,
-      `url-${trimmed}`,
-      trimmed,
-      cache.ttl,
-    );
-    if (!css) throw new Error(`could not download theme from ${trimmed}`);
-    return { name: trimmed, css, source: trimmed };
   }
 
   const registry = await getRegistry(opts);

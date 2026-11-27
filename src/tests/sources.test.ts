@@ -287,20 +287,15 @@ describe("resolveTheme", () => {
     );
   });
 
-  test(
-    "a URL ending in .css is a URL, not a local path",
-    {
-      todo: 'the local-path check (`endsWith(".css")`) runs before the URL check',
-    },
-    async () => {
-      const url = "https://example.com/theme.css";
-      const t = await resolveTheme(url, {
-        cacheDir,
-        fetch: mockFetch({ [url]: "/* url */" }),
-      });
-      assert.equal(t.css, "/* url */");
-    },
-  );
+  test("a URL ending in .css is a URL, not a local path", async () => {
+    const url = "https://example.com/theme.css";
+    const t = await resolveTheme(url, {
+      cacheDir,
+      fetch: mockFetch({ [url]: "/* url */" }),
+    });
+    assert.equal(t.css, "/* url */");
+    assert.equal(t.source, url);
+  });
 
   test("relative paths resolve against the working directory", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "qt-cwd-"));
