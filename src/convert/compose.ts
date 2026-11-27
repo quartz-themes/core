@@ -140,16 +140,13 @@ export const CONTENT_RESET = `:where(.markdown-preview-view .callout.is-collapse
 :where(.markdown-preview-view) :where(pre > code) {
   counter-reset: line;
 }
-/* Quartz's numbers sit in a 1rem gutter with a 1rem gap and assume code that
-   never wraps. Obsidian wraps code (pre-wrap, break-word), which splits a
-   two-digit number across rows and runs wrapped code under the gutter: keep
-   the number on one row and hang the line's wrapped rows past the gutter. */
-:where(.markdown-preview-view) :where(pre > code > [data-line]) {
-  padding-inline-start: 2rem;
-}
-:where(.markdown-preview-view) :where(pre > code > [data-line])::before {
-  margin-inline-start: -2rem;
-  white-space: nowrap;
+/* Quartz sizes its line-number gutter for lines that never wrap: long lines
+   scroll. Obsidian's code rule (code[data-language] here) wraps them, which
+   splits a two-digit number across rows and runs wrapped code under the
+   numbers. Quartz's numbered blocks keep Quartz's unwrapped lines; the rule
+   outweighs that code rule, which follows this reset in the layer. */
+:where(.markdown-preview-view) code[data-language]:has(> [data-line]) {
+  white-space: pre;
 }
 /* The search button's label and a Bases table's group property are Obsidian's
    faint UI text (a search field's placeholder, a group heading's key). On plain

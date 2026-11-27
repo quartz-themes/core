@@ -1,6 +1,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
-import { convertObsidianCss } from "../convert/convert";
+import { convertObsidianCss, specificity } from "../convert/convert";
+import selectorParser from "postcss-selector-parser";
 import { resolveIcon } from "../convert/icons";
 import { composeStylesheet } from "../convert/compose";
 
@@ -1221,15 +1222,21 @@ describe("renamed elements", () => {
       /:where\(\.markdown-preview-view\) :where\(pre > code\) \{\n {2}counter-reset: line;\n\}/,
     );
   });
-  test("code line numbers stay on one row and wrapped code hangs past them", () => {
+  test("Quartz's numbered code blocks keep their lines unwrapped, over Obsidian's code rule", () => {
+    const app = conv('code[class*="language-"] { white-space: pre-wrap; }');
+    const appSelector = app.slice(0, app.indexOf("{")).trim();
     const { main } = composeStylesheet({ app: "", theme: "" });
-    assert.match(
-      main,
-      /:where\(\.markdown-preview-view\) :where\(pre > code > \[data-line\]\) \{\n {2}padding-inline-start: 2rem;\n\}/,
-    );
-    assert.match(
-      main,
-      /:where\(\.markdown-preview-view\) :where\(pre > code > \[data-line\]\)::before \{\n {2}margin-inline-start: -2rem;\n {2}white-space: nowrap;\n\}/,
+    const unwrap = main.match(
+      /\n(:where\(\.markdown-preview-view\) code\[data-language\]:has\(> \[data-line\]\)) \{\n {2}white-space: pre;\n\}/,
+    )?.[1];
+    assert.ok(unwrap, "the unwrap rule is emitted");
+    const spec = (sel: string) =>
+      specificity(selectorParser().astSync(sel).first);
+    const [a, b] = [spec(unwrap), spec(appSelector)];
+    assert.ok(
+      a[0] > b[0] ||
+        (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2]))),
+      `${unwrap} (${a}) outweighs ${appSelector} (${b})`,
     );
   });
   test("code blocks' copy button is Quartz's clipboard button, same specificity", () => {
