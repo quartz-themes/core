@@ -2,7 +2,8 @@ import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import { convertObsidianCss } from "../convert/convert";
 import { resolveIcon } from "../convert/icons";
-import { composeStylesheet } from "../convert/compose";
+import { bridgeCss, composeStylesheet } from "../convert/compose";
+import { backdropCss } from "../convert/backdrop";
 
 const conv = (css: string, opts = {}) =>
   convertObsidianCss(css, opts).css.replace(/\s+/g, " ").trim();
@@ -1309,5 +1310,366 @@ describe("folding", () => {
       conv(".markdown-preview-view.allow-fold-headings h2 { color: red }"),
       ".markdown-preview-view:not(.qt-0) h2 { color: red }",
     );
+  });
+});
+
+const ws = (css: string) => css.replace(/\s+/g, " ").trim();
+
+describe("compose: Quartz's chrome follows the theme", () => {
+  test("callout icons are painted from --callout-icon as a mask", () => {
+    const main = ws(composeStylesheet({ app: "", theme: "" }).main);
+    assert.ok(
+      main.includes(
+        ':where(.callout-icon) { display: flex; align-items: center; } :where(.callout-icon)::before { content: ""; display: block; width: var(--icon-size, 18px); height: var(--icon-size, 18px); background-color: currentColor; -webkit-mask: var(--callout-icon) no-repeat center / contain; mask: var(--callout-icon) no-repeat center / contain; }',
+      ),
+    );
+  });
+
+  test("Quartz's variables point at Obsidian's, on the page and the main column", () => {
+    const bridge =
+      ":where(body, #quartz-root, .center) { --light: var(--background-primary); --lightgray: var(--background-modifier-border); --gray: var(--text-faint); --darkgray: var(--text-normal); --dark: var(--text-normal); --secondary: var(--text-accent); --tertiary: var(--text-accent-hover); --highlight: var(--background-modifier-hover); --textHighlight: var(--text-highlight-bg);";
+    const main = ws(composeStylesheet({ app: "", theme: "" }).main);
+    assert.ok(
+      main.includes(
+        `${bridge} --bodyFont: var(--font-text); --headerFont: var(--font-text); --codeFont: var(--font-monospace); }`,
+      ),
+    );
+    // With the site's Quartz fonts, the colours stay and the fonts go.
+    const own = ws(
+      composeStylesheet({ app: "", theme: "", quartzFonts: true }).main,
+    );
+    assert.ok(own.includes(`${bridge} }`));
+    assert.match(ws(bridgeCss()), /--bodyFont: var\(--font-text\);/);
+    assert.doesNotMatch(own, /--(bodyFont|headerFont|codeFont): var\(--font/);
+  });
+
+  test("Quartz's Obsidian variables are undefined on body, below app.css", () => {
+    const main = ws(composeStylesheet({ app: "", theme: "" }).main);
+    assert.ok(
+      main.includes(
+        ":where(body) { --accent-h: initial; --accent-l: initial; --accent-s: initial; --background-modifier-border: initial;",
+      ),
+    );
+    assert.ok(
+      main.includes(
+        "--text-faint: initial; --text-highlight-bg: initial; --text-muted: initial; --text-normal: initial; --text-on-accent: initial; --text-on-accent-inverted: initial; }",
+      ),
+    );
+  });
+
+  test("the page never scrolls sideways", () => {
+    const main = ws(composeStylesheet({ app: "", theme: "" }).main);
+    assert.ok(
+      main.includes(
+        "@layer quartz-base { :where(:root) { overflow-x: clip !important; } }",
+      ),
+    );
+  });
+
+  test("Quartz's :root variables are unset, except those the theme sets there", () => {
+    const rootBlock = (theme: string) => {
+      const main = ws(composeStylesheet({ app: "", theme }).main);
+      return main.slice(main.lastIndexOf("@layer quartz-base { :root {"));
+    };
+    for (const theme of [
+      ":root { --text-normal: red }",
+      "html.theme-dark { --text-normal: red }",
+    ]) {
+      const block = rootBlock(theme);
+      assert.ok(
+        block.startsWith(
+          "@layer quartz-base { :root { --background-primary: initial !important;",
+        ),
+        theme,
+      );
+      assert.doesNotMatch(block, /--text-normal/, theme);
+      assert.ok(
+        block.includes(
+          "--background-modifier-border-focus: initial !important; --text-muted: initial !important; --text-faint: initial !important;",
+        ),
+        theme,
+      );
+      assert.ok(block.endsWith("--accent-l: initial !important; } }"), theme);
+    }
+    // A body rule's variables don't count.
+    assert.match(
+      rootBlock("body { --text-normal: red }"),
+      /--text-normal: initial !important/,
+    );
+  });
+});
+
+describe("platform and device state", () => {
+  test("one platform, Linux: macOS-only translucency doesn't apply", () => {
+    // Claudian, Meridian: transparent on macOS, which a web page can't show through.
+    assert.equal(
+      conv(
+        "body:not(.mod-windows):not(.mod-linux) { --background-primary: transparent }",
+      ),
+      "body:not(.qt-0):not(:where(body):not(.qt-0)) { --background-primary: transparent }",
+    );
+    assert.equal(conv("body.mod-macos { --x: 1 }"), "");
+    assert.equal(conv(".is-phone p { color: red }"), "");
+  });
+
+  test("body state table", () => {
+    const always = "body:not(.qt-0) { --x: 1 }";
+    const never = "body:not(:where(body):not(.qt-0)) { --x: 1 }";
+    const present = [
+      "css-settings-manager",
+      "show-inline-title",
+      "show-view-header",
+      "show-ribbon",
+      "is-focused",
+      "styled-scrollbars",
+      "obsidian-app",
+      "is-hidden-frameless",
+      "is-frameless",
+      "mod-linux",
+      "is-left-sidedock-open",
+      "is-right-sidedock-open",
+    ];
+    const absent = [
+      "is-mobile",
+      "is-phone",
+      "is-tablet",
+      "is-ios",
+      "is-android",
+      "is-translucent",
+      "is-fullscreen",
+      "is-popout-window",
+      "native-scrollbars",
+      "mod-macos",
+      "mod-windows",
+      "mod-rtl",
+      "is-grabbing",
+      "colorful-frame",
+    ];
+    for (const cls of present) {
+      assert.equal(conv(`body.${cls} { --x: 1 }`), always, cls);
+      assert.equal(conv(`body:not(.${cls}) { --x: 1 }`), never, cls);
+    }
+    for (const cls of absent) {
+      assert.equal(conv(`body.${cls} { --x: 1 }`), "", cls);
+      assert.equal(conv(`body:not(.${cls}) { --x: 1 }`), always, cls);
+    }
+    // Unknown classes are kept verbatim.
+    assert.equal(
+      conv("body.mod-other { --x: 1 }"),
+      "body.mod-other { --x: 1 }",
+    );
+  });
+});
+
+describe("backgrounds that aren't the page's", () => {
+  test("the reading view's pseudo-elements and states keep their own background", () => {
+    for (const css of [
+      ".markdown-preview-view::before { background: red }",
+      ".markdown-preview-view:hover { background: red }",
+    ]) {
+      assert.equal(conv(css), css);
+    }
+    assert.equal(
+      conv(".markdown-reading-view:has(> .sci-fi) { background: red }"),
+      ":not(.qt-0):has(>.sci-fi) { background: red }",
+    );
+  });
+
+  test("`background: unset` is a transparent layer", () => {
+    assert.equal(
+      conv(".markdown-preview-view { background: unset }"),
+      "body:not(.qt-0) { --qt-bg0-color: transparent; --qt-bg0-image: none; --qt-bg0-tail: none }",
+    );
+  });
+
+  test("body paints every layer, innermost on top", () => {
+    const css = ws(backdropCss());
+    assert.ok(
+      css.startsWith(
+        "body { background-color: var(--qt-bg11-color); background-image: var(--qt-bg0-image), var(--qt-bg0-tail), linear-gradient(var(--qt-bg0-color), var(--qt-bg0-color)), var(--qt-bg1-image), var(--qt-bg1-tail), linear-gradient(var(--qt-bg1-color), var(--qt-bg1-color)),",
+      ),
+    );
+    for (const fragment of [
+      "linear-gradient(var(--qt-bg10-color), var(--qt-bg10-color)), var(--qt-bg11-image), var(--qt-bg11-tail); background-size: var(--qt-bg0-size, auto), var(--qt-bg0-size, auto), auto, var(--qt-bg1-size, auto),",
+      "var(--qt-bg10-size, auto), auto, var(--qt-bg11-size, auto), var(--qt-bg11-size, auto); background-position: var(--qt-bg0-position, 0% 0%), var(--qt-bg0-position, 0% 0%), 0% 0%, var(--qt-bg1-position, 0% 0%),",
+      "var(--qt-bg11-position, 0% 0%); background-repeat: var(--qt-bg0-repeat, repeat), var(--qt-bg0-repeat, repeat), repeat, var(--qt-bg1-repeat, repeat),",
+      "var(--qt-bg11-repeat, repeat); background-attachment: var(--qt-bg0-attachment, scroll), var(--qt-bg0-attachment, scroll), scroll, var(--qt-bg1-attachment, scroll),",
+    ])
+      assert.ok(css.includes(fragment), fragment);
+    assert.ok(
+      css.endsWith(
+        "var(--qt-bg11-attachment, scroll), var(--qt-bg11-attachment, scroll); }",
+      ),
+    );
+    // 12 layers of image + tail, 11 of them over their colour.
+    for (const prop of ["image", "size", "position", "repeat", "attachment"]) {
+      const decl = css.match(new RegExp(`background-${prop}: ([^;]*);`))![1]!;
+      let depth = 0;
+      let entries = 1;
+      for (const ch of decl) {
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        else if (ch === "," && depth === 0) entries++;
+      }
+      assert.equal(entries, 35, prop);
+    }
+    assert.equal(css.match(/linear-gradient\(/g)!.length, 11);
+  });
+});
+
+describe("sidebar leaves", () => {
+  test("a leaf's view type is its Quartz component", () => {
+    const leaf = (type: string, rest = "p") =>
+      conv(
+        `.workspace-leaf-content[data-type="${type}"] ${rest} { color: red }`,
+      );
+    assert.equal(
+      leaf("file-explorer", ".nav-file-title"),
+      ":not(.qt-0):where(.explorer):not(.qt-0) .nav-file-title { color: red }",
+    );
+    assert.equal(
+      leaf("outline", ".tree-item"),
+      ":not(.qt-0):where(.toc):not(.qt-0) .tree-item { color: red }",
+    );
+    for (const [type, component] of [
+      ["backlink", ".backlinks"],
+      ["graph", ".graph"],
+      ["localgraph", ".graph"],
+      ["search", ".search"],
+      ["canvas", ".canvas"],
+    ])
+      assert.equal(
+        leaf(type!),
+        `:not(.qt-0):where(${component}):not(.qt-0) p { color: red }`,
+        type,
+      );
+    for (const type of ["markdown", "bases"])
+      assert.equal(leaf(type), ":not(.qt-0):not(.qt-0) p { color: red }");
+    // Views Quartz doesn't have.
+    assert.equal(leaf("kanban"), "");
+  });
+
+  test("renamed elements and mapped wrappers", () => {
+    for (const [cls, quartz] of [
+      ["is-unresolved", ".broken"],
+      ["copy-code-button", ".clipboard-button"],
+      ["modal-container", ".search-container"],
+    ])
+      assert.equal(
+        conv(`.${cls} { color: red }`),
+        `:where(${quartz}):not(.qt-0) { color: red }`,
+      );
+    for (const [cls, quartz] of [
+      ["mod-left-split", ".left.sidebar"],
+      ["mod-right-split", ".right.sidebar"],
+      ["site-body-left-column", ".left.sidebar"],
+      ["site-body-right-column", ".right.sidebar"],
+      ["site-header", ".page-header"],
+      ["site-footer", "footer"],
+    ])
+      assert.equal(
+        conv(`.${cls} p { color: red }`),
+        `:where(${quartz}):not(.qt-0) p { color: red }`,
+      );
+    assert.equal(
+      conv(".published-container p { color: red }"),
+      ":where(body):where(body):not(.qt-0) p { color: red }",
+    );
+  });
+
+  test("app-only classes drop the rule", () => {
+    for (const cls of [
+      "cm-header",
+      "HyperMD-header",
+      "workspace-tab-header",
+      "workspace-ribbon",
+      "workspace-leaf-resize-handle",
+      "workspace-drawer",
+      "workspace-sidedock",
+      "side-dock",
+      "status-bar",
+      "status-bar-item",
+      "titlebar",
+      "modal",
+      "modal-title",
+      "menu",
+      "menu-item",
+      "setting-item",
+      "vertical-tab",
+      "view-header",
+      "view-action",
+      "mobile-toolbar",
+      "nav-header",
+      "nav-buttons-container",
+      "nav-action-button",
+      "community-item",
+      "pdf-toolbar",
+      "notice",
+      "drag-ghost",
+      "graph-controls",
+      "sidebar-toggle-button",
+      "mod-cm6",
+      "mod-cta",
+      "markdown-source-view",
+      "is-live-preview",
+      "is-source-mode",
+      "cm-s-obsidian",
+      "dropdown",
+      "checkbox-container",
+      "tooltip",
+      "inline-title-wrapper",
+      "metadata-add",
+      "multi-select-input",
+      "multi-select-pill-remove",
+      "suggestion-container",
+      "prompt-instruction",
+      "mod-sidedock",
+      "mod-top",
+      "mod-left-split-ribbon",
+      "hover-editor",
+      "sync-status",
+      "backlink-pane",
+      "outgoing-link-pane",
+      "release-notes",
+      "is-grabbing",
+      "is-being-dragged",
+      "card-title",
+      "nav-folder-collapse-indicator",
+      "is-read-mode",
+    ])
+      assert.equal(conv(`.${cls} p { color: red }`), "", cls);
+    // Whole class names only, for prefixes without a dash.
+    for (const cls of ["menubar", "noticed", "tooltips", "modals"])
+      assert.equal(
+        conv(`.${cls} p { color: red }`),
+        `.${cls} p { color: red }`,
+        cls,
+      );
+  });
+});
+
+describe("quarantine", () => {
+  test("only the rejected rule moves, inside its @media", () => {
+    const res = convertObsidianCss(
+      "@media (min-width:1px){p{color:blue}.x:nth-child(foo){color:red}}",
+    );
+    assert.equal(ws(res.css), "@media (min-width:1px){p{color:blue}}");
+    assert.equal(
+      ws(res.quarantine),
+      "@media (min-width:1px){.x:nth-child(foo){color:red}}",
+    );
+    assert.equal(res.stats.quarantined, 1);
+  });
+
+  test("a repaired sheet keeps its at-rules and !important", () => {
+    const res = convertObsidianCss(
+      ".a{color:red}} .x{color:green} @media (max-width:600px){.b{color:blue !important}}",
+    );
+    assert.equal(res.stats.repaired, "css-tree");
+    assert.equal(
+      ws(res.css),
+      ".a { color: red } @media (max-width:600px) { .b { color: blue !important } }",
+    );
+    assert.equal(ws(res.quarantine), "} .x { color: green }");
   });
 });

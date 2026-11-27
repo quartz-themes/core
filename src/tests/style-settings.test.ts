@@ -1,6 +1,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  parseColor,
   parseStyleSettings,
   resolveStyleSettings,
 } from "../convert/style-settings";
@@ -207,5 +208,122 @@ settings:
     assert.doesNotMatch(css, /--weight/);
     assert.match(css, /--font: b;/);
     assert.deepEqual(unknown, ["sel@@weight"]);
+  });
+});
+
+describe("colour formats", () => {
+  const section = (setting: Record<string, unknown>) =>
+    [{ id: "demo", settings: [{ id: "c", ...setting }] }] as never;
+  const ws = (css: string) => css.replace(/\s+/g, " ").trim();
+
+  test("light-mode colours, as comma-separated rgb values with opacity", () => {
+    const { css, applied } = resolveStyleSettings(
+      section({
+        type: "variable-themed-color",
+        format: "rgb-values",
+        opacity: true,
+        "default-light": "#fff",
+        "default-dark": "#000",
+      }),
+      { "demo@@c@@light": "#0000ff80" },
+    );
+    assert.equal(
+      ws(css),
+      "body.theme-light.css-settings-manager { --c: 0,0,255,0.502; }",
+    );
+    assert.deepEqual(applied, ["demo@@c@@light"]);
+    // An unset value is the mode's default.
+    assert.equal(
+      ws(
+        resolveStyleSettings(
+          section({
+            type: "variable-themed-color",
+            format: "hex",
+            "default-light": "#fff",
+            "default-dark": "#000",
+          }),
+          { "demo@@c@@light": null },
+        ).css,
+      ),
+      "body.theme-light.css-settings-manager { --c: #fff; }",
+    );
+  });
+
+  test("hsl-split", () => {
+    const { css } = resolveStyleSettings(
+      section({ type: "variable-color", format: "hsl-split" }),
+      { "demo@@c": "#0000ff" },
+    );
+    assert.equal(
+      ws(css),
+      "body.css-settings-manager { --c-h: 240; --c-s: 100%; --c-l: 50%; }",
+    );
+  });
+
+  test("rgb with alpha, from a space-separated rgb()", () => {
+    const { css } = resolveStyleSettings(
+      section({ type: "variable-color", format: "rgb" }),
+      { "demo@@c": "rgb(1 2 3 / 50%)" },
+    );
+    assert.equal(
+      ws(css),
+      "body.css-settings-manager { --c: rgba(1,2,3,0.5); }",
+    );
+  });
+
+  test("hue of red-, green- and blue-dominant colours", () => {
+    const hsl = (value: string) =>
+      ws(
+        resolveStyleSettings(
+          section({ type: "variable-color", format: "hsl" }),
+          { "demo@@c": value },
+        ).css,
+      );
+    assert.equal(
+      hsl("#00ff00"),
+      "body.css-settings-manager { --c: hsl(120,100%,50%); }",
+    );
+    assert.equal(
+      hsl("#3366cc"),
+      "body.css-settings-manager { --c: hsl(220,60%,50%); }",
+    );
+    assert.equal(
+      hsl("#ff0080"),
+      "body.css-settings-manager { --c: hsl(329.88,100%,50%); }",
+    );
+    assert.equal(
+      hsl("#cc6633"),
+      "body.css-settings-manager { --c: hsl(20,60%,50%); }",
+    );
+    assert.equal(
+      hsl("#808080"),
+      "body.css-settings-manager { --c: hsl(0,0%,50.2%); }",
+    );
+  });
+});
+
+describe("parseColor", () => {
+  test("3- and 8-digit hex, hsl()", () => {
+    assert.deepEqual(parseColor("#0f8"), { r: 0, g: 255, b: 136, a: 1 });
+    assert.deepEqual(parseColor("#0f88"), { r: 0, g: 255, b: 136, a: 0.533 });
+    assert.deepEqual(parseColor(" #11223380 "), {
+      r: 17,
+      g: 34,
+      b: 51,
+      a: 0.502,
+    });
+    assert.deepEqual(parseColor("hsl(120, 100%, 25%)"), {
+      r: 0,
+      g: 128,
+      b: 0,
+      a: 1,
+    });
+    assert.deepEqual(parseColor("hsla(240 100% 50% / 0.5)"), {
+      r: 0,
+      g: 0,
+      b: 255,
+      a: 0.5,
+    });
+    assert.equal(parseColor("red"), null);
   });
 });
